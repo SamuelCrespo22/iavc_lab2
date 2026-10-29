@@ -74,7 +74,9 @@ def train_encoder(descs, encoder_type="fv", num_words=32, pca_dim=0, seed=0, cac
         kmeans.fit(descs)
         encoder["words"] = kmeans.cluster_centers_
     
-    print(f"Training encoder of type '{encoder_type}' completed in {time.time() - start_time:.2f} seconds.")
+    # Keep the fitting time (PCA + k-means/GMM) with the encoder for reporting.
+    encoder["fit_time_s"] = time.time() - start_time
+    print(f"Training encoder of type '{encoder_type}' completed in {encoder['fit_time_s']:.2f} seconds.")
 
     return encoder
 
