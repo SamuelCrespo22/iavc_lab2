@@ -34,16 +34,17 @@ KS = [256, 512, 1024]
 NUM_TILES = 4
 
 
-def removeSpatialInformation(histograms):
-    """Sum the 4 tile histograms into one global histogram.
+def removeSpatialInformation(histograms: np.ndarray) -> np.ndarray:
+    """Average four spatially tiled histograms into one histogram per image.
 
-    Encodings are stored tile-major, ``[tile0 | tile1 | tile2 | tile3]`` (see
-    ``ImageEncoder.encode_tiling``), so the tile axis is axis 1 after reshaping
-    to ``(N, 4, K)``. ``src.encoders.removeSpatialInformation`` reshapes to
-    ``(N, K, 4)`` instead, which merges neighbouring words, not tiles.
+    Args:
+        histograms: Array of shape ``(N, num_words * 4)``.
+
+    Returns:
+        Array of shape ``(N, num_words)`` with the tile dimension averaged.
     """
     N = histograms.shape[0]
-    return histograms.reshape(N, NUM_TILES, -1).sum(axis=1)
+    return np.mean(np.reshape(histograms, (N, -1, 4)), axis=2)
 
 
 def l1(x):
@@ -78,8 +79,11 @@ def prepare(hist, spatial, feature_map):
     return FEATURE_MAPS[feature_map](hist)
 
 
-def trainAndEvaluate(data, transform, C, train_subset=None):
-    """Train on ``transform(x_train)`` and report AP on train/val/test."""
+def trainAndEvaluate(data, transform, C, train_subset=None, return_model=False):
+    """Train on ``transform(x_train)`` and report AP on train/val/test.
+
+    With ``return_model``, returns ``(result, (W, b))``.
+    """
     x_train, y_train = train_subset if train_subset is not None else data["train"][:2]
     x_train = transform(x_train)
 
@@ -101,7 +105,7 @@ def trainAndEvaluate(data, transform, C, train_subset=None):
             result["acc_test"] = accuracy_score(y, pred)
             result["f1_test"] = f1_score(y, pred, average="macro")
         result[f"ap_{subset}"] = average_precision_score(y, scores)
-    return result
+    return (result, (W, b)) if return_model else result
 
 
 def runGrid(categories, ks, feature_maps, C):

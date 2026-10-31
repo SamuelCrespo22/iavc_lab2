@@ -1,28 +1,33 @@
-"""Extract frozen pretrained-CNN descriptors as encodings.
+"""Extract frozen pretrained-model descriptors as encodings.
 
-Every image listed in data/splits goes through ImageNet ResNet-18 (torchvision
-weights and preprocessing, backbone frozen). Global average pooling of the
-outputs of the final 3 stages gives one descriptor per layer:
+Every image listed in data/splits goes through a frozen pretrained model with
+its official preprocessing. Each model yields one or more encodings:
 
-    layer2 (128-d)   layer3 (256-d)   layer4 (512-d)
+    resnet18        resnet18_layer2 / _layer3 / _layer4   GAP of the final 3
+                    stages (128 / 256 / 512-d), ImageNet torchvision weights
+    dinov2_vits14   dinov2_vits14_cls         CLS token after the final norm (384-d)
+                    dinov2_vits14_patchmean   mean of the 256 patch tokens (384-d)
+    clip_vit_b_32   clip_vit_b_32             CLIP image embedding (512-d), the
+                    space the text prompts are compared in
 
-Each is saved as <output-dir>/resnet18_<layer>/<category>_<train|val>.npz with
-the same keys as src.extract ("file_names", "histograms"), so the protocol
+Each encoding is saved as <output-dir>/<encoding>/<category>_<train|val>.npz
+with the same keys as src.extract ("file_names", "histograms"), so the protocol
 splits and loaders apply unchanged. With --flip, the descriptors of the
 horizontally flipped images are stored too ("histograms_flip"). A meta.json in
-each folder records the device, dimensions and extraction time.
+each folder records the model, device, dimension and extraction time.
 
 Usage (from the directory containing README.md):
-    python -m src.extract_deep
-    python -m src.extract_deep --flip --force
+    python -m src.extract_deep                          # resnet18
+    python -m src.extract_deep -m dinov2_vits14 clip_vit_b_32 --flip
 """
 
 import os
 
 # The cvc-a2 env links two OpenMP runtimes (torch and numpy/sklearn); torch must
 # be imported before numpy and the duplicate allowed, otherwise the forward pass
-# crashes.
+# crashes. Ops missing on Apple MPS fall back to the CPU.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 import torch
 
 import json
@@ -38,8 +43,41 @@ from .deep_models import IntermediateFeatureExtractor, getModel
 RESNET18_LAYERS = {"layer2": "layer2.1", "layer3": "layer3.1", "layer4": "layer4.1"}
 
 
-def resnet18Encoding(layer):
-    return f"resnet18_{layer}"
+def resnet18Model(device):
+    model, preprocess = getModel("resnet18", device=device)
+    extractor = IntermediateFeatureExtractor(model)
+
+    def describe(x):
+        _, blocks = extractor(x)
+        return {f"resnet18_{layer}": blocks[block].mean(dim=(2, 3))
+                for layer, block in RESNET18_LAYERS.items()}
+    return preprocess, describe
+
+
+def dinov2Model(device):
+    model, preprocess = getModel("dinov2_vits14", device=device)
+
+    def describe(x):
+        out = model.forward_features(x)
+        return {"dinov2_vits14_cls": out["x_norm_clstoken"],
+                "dinov2_vits14_patchmean": out["x_norm_patchtokens"].mean(dim=1)}
+    return preprocess, describe
+
+
+def clipModel(device):
+    model, preprocess = getModel("clip_vit_b_32", device=device)
+
+    def describe(x):
+        return {"clip_vit_b_32": model.encode_image(x)}
+    return preprocess, describe
+
+
+# model name -> builder returning (preprocess, describe(batch) -> {encoding: (B, C)})
+MODELS = {
+    "resnet18": resnet18Model,
+    "dinov2_vits14": dinov2Model,
+    "clip_vit_b_32": clipModel,
+}
 
 
 def defaultDevice():
@@ -60,10 +98,9 @@ def readImageLists(split_dir):
     return lists
 
 
-def resnet18Descriptors(names, img_dir, device, batch_size=64, flip=False):
-    """GAP descriptors per layer: ``{layer: (N, C)}``, plus ``{layer}_flip`` with ``flip``."""
-    model, preprocess = getModel("resnet18", device=device)
-    extractor = IntermediateFeatureExtractor(model)
+def describeImages(model_name, names, img_dir, device, batch_size=64, flip=False):
+    """``{encoding: (N, C)}`` for ``names``, plus ``{encoding}_flip`` with ``flip``."""
+    preprocess, describe = MODELS[model_name](device)
     feats = {}
     for start in range(0, len(names), batch_size):
         batch = names[start:start + batch_size]
@@ -73,58 +110,59 @@ def resnet18Descriptors(names, img_dir, device, batch_size=64, flip=False):
         views = {"": x, "_flip": torch.flip(x, dims=[3])} if flip else {"": x}
         with torch.inference_mode():
             for suffix, view in views.items():
-                _, blocks = extractor(view)
-                for layer, block in RESNET18_LAYERS.items():
-                    pooled = blocks[block].mean(dim=(2, 3)).float().cpu().numpy()
-                    feats.setdefault(layer + suffix, []).append(pooled)
-        print(f"\rExtracted {min(start + batch_size, len(names))}/{len(names)} images", end="")
+                for encoding, value in describe(view).items():
+                    feats.setdefault(encoding + suffix, []).append(value.float().cpu().numpy())
+        print(f"\r{model_name}: {min(start + batch_size, len(names))}/{len(names)} images", end="")
     print()
-    extractor.remove_hooks()
     return {key: np.concatenate(value) for key, value in feats.items()}
 
 
-def extractResNet18(split_dir="data/splits", img_dir="data/images", output_dir="data/encodings",
-                    device=None, batch_size=64, flip=False, force=False):
-    """Extract and save the ResNet-18 encodings; returns the meta dictionary."""
+def extractModel(model_name, split_dir="data/splits", img_dir="data/images",
+                 output_dir="data/encodings", device=None, batch_size=64, flip=False, force=False):
+    """Extract and save the encodings of one model; returns ``{encoding: meta}``."""
     device = device or defaultDevice()
-    out_dirs = {layer: Path(output_dir) / resnet18Encoding(layer) for layer in RESNET18_LAYERS}
-    meta_file = out_dirs["layer4"] / "meta.json"
-    if meta_file.exists() and not force:
-        print(f"{meta_file.parent} already exists. Skipping (use --force to re-extract)")
-        return json.loads(meta_file.read_text())
+    existing = sorted(Path(output_dir).glob("*/meta.json"))
+    done = {p.parent.name: json.loads(p.read_text()) for p in existing}
+    done = {enc: meta for enc, meta in done.items() if meta.get("model_name") == model_name}
+    if done and not force:
+        print(f"{model_name}: {', '.join(done)} already exist. Skipping (use --force to re-extract)")
+        return done
 
     lists = readImageLists(split_dir)
     names = sorted({n for ids in lists.values() for n in ids})
-    print(f"Extracting ResNet-18 features for {len(names)} images on {device}")
+    print(f"Extracting {model_name} features for {len(names)} images on {device}")
     start = time.perf_counter()
-    feats = resnet18Descriptors(names, img_dir, device, batch_size, flip)
+    feats = describeImages(model_name, names, img_dir, device, batch_size, flip)
     total_time = time.perf_counter() - start
 
     row = {n: i for i, n in enumerate(names)}
-    for layer, out_dir in out_dirs.items():
+    metas = {}
+    for encoding in [k for k in feats if not k.endswith("_flip")]:
+        out_dir = Path(output_dir) / encoding
         out_dir.mkdir(parents=True, exist_ok=True)
         for (category, source), ids in lists.items():
             idx = [row[n] for n in ids]
-            arrays = {"file_names": np.asarray(ids), "histograms": feats[layer][idx]}
+            arrays = {"file_names": np.asarray(ids), "histograms": feats[encoding][idx]}
             if flip:
-                arrays["histograms_flip"] = feats[f"{layer}_flip"][idx]
+                arrays["histograms_flip"] = feats[f"{encoding}_flip"][idx]
             np.savez_compressed(out_dir / f"{category}_{source}.npz", **arrays)
-
-    meta = {"model": "resnet18 (torchvision ImageNet weights)", "device": device,
-            "num_images": len(names), "flip": flip, "extract_time_s": total_time,
-            # One forward pass yields all layers (two passes with flip).
+        metas[encoding] = {
+            "model_name": model_name, "device": device, "num_images": len(names), "flip": flip,
+            "dim": int(feats[encoding].shape[1]), "extract_time_s": total_time,
+            # One forward pass yields all encodings of the model (two passes with flip).
             "extract_ms_per_image": 1000 * total_time / len(names) / (2 if flip else 1),
-            "dims": {layer: int(feats[layer].shape[1]) for layer in RESNET18_LAYERS}}
-    for out_dir in out_dirs.values():
-        (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
-    print(f"Done in {total_time:.1f} s ({meta['extract_ms_per_image']:.1f} ms/image)")
-    return meta
+        }
+        (out_dir / "meta.json").write_text(json.dumps(metas[encoding], indent=2))
+    print(f"{model_name}: done in {total_time:.1f} s "
+          f"({next(iter(metas.values()))['extract_ms_per_image']:.1f} ms/image)")
+    return metas
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Extract frozen ResNet-18 descriptors as encodings.")
+    parser = argparse.ArgumentParser(description="Extract frozen pretrained-model descriptors as encodings.")
+    parser.add_argument("-m", "--models", nargs="+", default=["resnet18"], choices=list(MODELS))
     parser.add_argument("--data-dir", default="data/splits", help="Dataset split directory.")
     parser.add_argument("--img-dir", default="data/images", help="Image directory.")
     parser.add_argument("--output-dir", default="data/encodings", help="Encodings output directory.")
@@ -134,5 +172,6 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--force", action="store_true", help="Re-extract when output exists.")
     args = parser.parse_args()
 
-    extractResNet18(args.data_dir, args.img_dir, args.output_dir, args.device,
-                    args.batch_size, args.flip, args.force)
+    for model_name in args.models:
+        extractModel(model_name, args.data_dir, args.img_dir, args.output_dir, args.device,
+                     args.batch_size, args.flip, args.force)

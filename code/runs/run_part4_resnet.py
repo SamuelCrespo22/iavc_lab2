@@ -70,18 +70,21 @@ def runGrid(categories, baselines, C):
     return pd.DataFrame(rows)
 
 
+def deepEncodingInfo(encoding):
+    """Dimension, storage and extraction cost of an encoding written by src.extract_deep."""
+    enc_dir = ENCODINGS_DIR / encoding
+    meta = json.loads((enc_dir / "meta.json").read_text())
+    # Older ResNet meta.json files store {"dims": {layer: dim}} instead of "dim".
+    dim = meta["dim"] if "dim" in meta else meta["dims"][encoding.rsplit("_", 1)[1]]
+    return {"encoding": encoding, "dim": dim, "dtype": "float32",
+            "kb_per_image": dim * 4 / 1024,
+            "disk_mb": sum(f.stat().st_size for f in enc_dir.glob("*.npz")) / 2**20,
+            "extract_ms_per_image": meta["extract_ms_per_image"],
+            "device": meta["device"]}
+
+
 def encodingsInfo(baselines, timing_images):
-    rows = []
-    for layer in LAYERS:
-        enc_dir = ENCODINGS_DIR / encodingName(layer)
-        meta = json.loads((enc_dir / "meta.json").read_text())
-        dim = meta["dims"][layer]
-        rows.append({"encoding": encodingName(layer), "dim": dim, "dtype": "float32",
-                     "kb_per_image": dim * 4 / 1024,
-                     "disk_mb": sum(f.stat().st_size for f in enc_dir.glob("*.npz")) / 2**20,
-                     "extract_ms_per_image": meta["extract_ms_per_image"],
-                     "device": meta["device"]})
-    info = pd.DataFrame(rows)
+    info = pd.DataFrame([deepEncodingInfo(encodingName(layer)) for layer in LAYERS])
     if baselines:
         hand = measureEncodings([b[0] for b in baselines], timing_images)
         if "sift_ms_per_image" in hand:
@@ -132,7 +135,7 @@ if __name__ == "__main__":
 
     missing = [encodingName(l) for l in LAYERS if not (ENCODINGS_DIR / encodingName(l) / "meta.json").exists()]
     if missing:
-        raise SystemExit(f"Missing {', '.join(missing)}: run `python -m src.extract_deep` first")
+        raise SystemExit(f"Missing {', '.join(missing)}: run `python -m src.extract_deep -m resnet18` first")
     baselines = [] if args.no_baselines else [b for b in BASELINES if (ENCODINGS_DIR / b[0]).is_dir()]
 
     info = encodingsInfo(baselines, args.timing_images)
