@@ -1,141 +1,206 @@
-"""Part 3 experiments: large vocabulary + PCA vs. a directly smaller vocabulary.
+"""Part 3 experiments: large visual vocabulary + PCA vs. a directly smaller vocabulary.
 
-For every representation (BoVW at each available K, plus VLAD / FV for the
-"does the answer change" question) and every PCA output dimension d, trains the
-Part 1 linear SVM per category and reports test AP, accuracy and macro-F1.
+Question: is it better to build a rich representation with a large codebook and
+compress it with PCA, or to use a small codebook directly?
 
-  BoVW       global histogram (dimension = K, as in the assignment), Hellinger map
-  VLAD / FV  2x2 tiles, signed-sqrt + L2 (the setting selected in Part 2)
-  PCA        fit on the training features only, then L2 re-normalization;
-             d < original dimension and d <= num_train - 1
+Representations (same protocol and linear SVM as Part 1: one classifier per
+category, positives vs. background, C fixed):
 
-Conditions of the assignment table map to rows as follows:
-  A  small K, no PCA          B  large K, no PCA
-  C  large K + PCA to d       D  bovw K = d, no PCA (same final dimension as C)
+  BoVW  global histogram (2x2 tiles summed), Hellinger map      dim = K
+  VLAD  2x2 tiles, signed sqrt + L2                             dim = 4 * K * C
+  FV    2x2 tiles, signed sqrt + L2 ("improved" FV)             dim = 4 * (2*K*C + K)
 
-Stability: each seed trains on a different stratified subset (--subsample of the
-training set) and fits PCA on it; val/test are always the full sets.
+VLAD/FV stay tiled: their stored tiles are encoded (and VLAD normalized) per
+tile, so, unlike BoVW counts, they cannot be merged into an exact global vector.
 
-Codebook fitting time (PCA + k-means/GMM) is read from the encoder .npz
-("fit_time_s", saved by src.train); encoders trained before that was added
-show NaN until retrained.
+Each representation is evaluated without PCA and with PCA to every d in
+--pca-dims such that d < dim and d <= n_train - 1. PCA is fitted on the training
+images only and its output is L2 re-normalized.
 
-Results: <out>/part3_grid.csv and <out>/part3_encodings.csv.
+Conditions of the assignment table (BoVW):
+  A  small K, no PCA          (--small-k, default 256)
+  B  large K, no PCA          (--large-k, default 1024)
+  C  large K + PCA to d
+  D  K = d, no PCA            (same final dimension as C)
+VLAD/FV have no condition D: their smallest raw dimension is far above any d.
+For them, the same-dimension comparison is a larger K + PCA vs. a smaller K +
+PCA to the same d (part3_matched.csv).
+
+Stability: each seed trains on a different stratified subset (--subsample) of
+the training set and refits PCA on it; validation and test sets are always
+complete. The codebooks themselves are fixed (one k-means/GMM per K).
+
+Outputs (in --out):
+  part3_grid.csv         one row per (encoding, d, category, seed)
+  part3_summary.csv      per (encoding, d): mAP mean/std over seeds + costs   (Q2, Q4, Q5)
+  part3_conditions.csv   the A/B/C/D rows of the summary                      (Q3)
+  part3_matched.csv      test mAP per (type, final dimension) x codebook K    (Q3, Q5)
+  part3_per_class.csv    test AP per category, no PCA                         (Q1)
+  part3_map_vs_dim.png   test mAP vs. final dimension, one line per K         (Q1-Q3, Q5)
 
 Usage (from the directory containing README.md):
     python -m runs.run_part3
-    python -m runs.run_part3 --pca-dims 64 128 256 --seeds 0 1 2 --categories motorbike
+    python -m runs.run_part3 --encodings bovw_K256_C0 bovw_K1024_C0 --categories motorbike --seeds 0
 """
 
 import argparse
 import time
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 
-from runs.run_part1 import CATEGORIES, l2, loadData, stratifiedSubset, trainAndEvaluate
-from runs.run_part2 import ENCODINGS_DIR, measureEncodings, parseEncoding, prepare
+from runs.run_part1 import CATEGORIES, NUM_TILES, l2, loadData, stratifiedSubset, trainAndEvaluate
+from runs.run_part2 import ENCODINGS_DIR, measureEncodings, parseEncoding, signedSqrt
 
-# (encoding, spatial, feature map); missing encodings are skipped.
-DEFAULT_CONFIGS = [
-    ("bovw_K64_C0", False, "sqrt_l2"),
-    ("bovw_K128_C0", False, "sqrt_l2"),
-    ("bovw_K256_C0", False, "sqrt_l2"),
-    ("bovw_K512_C0", False, "sqrt_l2"),
-    ("bovw_K1024_C0", False, "sqrt_l2"),
-    ("vlad_K32_C80", True, "ssr_l2"),
-    ("fv_K32_C80", True, "ssr_l2"),
+DEFAULT_ENCODINGS = [
+    "bovw_K32_C0", "bovw_K64_C0", "bovw_K128_C0", "bovw_K256_C0", "bovw_K512_C0", "bovw_K1024_C0",
+    "vlad_K16_C80", "vlad_K32_C80", "vlad_K64_C80",
+    "fv_K16_C80", "fv_K32_C80", "fv_K64_C80",
 ]
 
 
-def pcaTransform(base, x_train, d, seed):
-    """Fit PCA on ``base(x_train)``; returns (transform, fit time in seconds)."""
+def globalHistogram(x):
+    """(N, 4*K) tiled BoVW counts -> (N, K) whole-image counts.
+
+    The stored vector is [tile 0 | tile 1 | tile 2 | tile 3]; every keypoint lies
+    in exactly one tile, so the sum over tiles is the global histogram.
+    """
+    return x.reshape(len(x), NUM_TILES, -1).sum(axis=1)
+
+
+# Representation fed to the SVM (and to PCA), per encoding type.
+FEATURES = {
+    "bovw": lambda x: l2(np.sqrt(globalHistogram(x))),  # Hellinger
+    "vlad": lambda x: l2(signedSqrt(x)),
+    "fv": lambda x: l2(signedSqrt(x)),
+}
+
+
+def fitPCA(x_train, d, seed):
+    """Fit PCA to d dimensions; returns (transform, fit time in seconds)."""
     start = time.perf_counter()
-    pca = PCA(n_components=d, random_state=seed).fit(base(x_train))
+    pca = PCA(n_components=d, random_state=seed).fit(x_train)
     fit_time = time.perf_counter() - start
-    return (lambda x: l2(pca.transform(base(x)))), fit_time
+    return (lambda x: l2(pca.transform(x))), fit_time
 
 
-def runGrid(configs, categories, pca_dims, seeds, subsample, C):
+def runGrid(encodings, categories, pca_dims, seeds, subsample, C):
     rows = []
-    for encoding, spatial, feature_map in configs:
-        enc_type, K, pca_desc = parseEncoding(encoding)
-        D = pca_desc or 128
-        base = lambda x: prepare(x, spatial, enc_type, feature_map, D)
+    for encoding in encodings:
+        enc_type, K, _ = parseEncoding(encoding)
         for category in categories:
-            data = loadData(category, encoding)
+            # Compute the (non-PCA) representation once for train/val/test.
+            data = {subset: (FEATURES[enc_type](x.astype(np.float64)), y, names)
+                    for subset, (x, y, names) in loadData(category, encoding).items()}
             x_all, y_all, _ = data["train"]
+            orig_dim = x_all.shape[1]
             for seed in seeds:
                 sel = stratifiedSubset(y_all, subsample, seed)
                 x, y = x_all[sel], y_all[sel]
-                orig_dim = base(x[:1]).shape[1]
-                dims = [None] + [d for d in pca_dims if d < orig_dim and d <= len(y) - 1]
+                dims = [0] + [d for d in pca_dims if d < orig_dim and d <= len(y) - 1]
                 for d in dims:
-                    if d is None:
-                        transform, pca_time = base, 0.0
+                    if d == 0:
+                        transform, pca_time = (lambda v: v), 0.0
                     else:
-                        transform, pca_time = pcaTransform(base, x, d, seed)
+                        transform, pca_time = fitPCA(x, d, seed)
                     res = trainAndEvaluate(data, transform, C, train_subset=(x, y))
                     rows.append({"encoding": encoding, "type": enc_type, "K": K,
-                                 "spatial": spatial, "feature_map": feature_map,
-                                 "category": category, "seed": seed,
-                                 "orig_dim": orig_dim, "pca_dim": d or 0,
-                                 "pca_fit_s": pca_time, **res})
+                                 "category": category, "seed": seed, "num_train": len(y),
+                                 "orig_dim": orig_dim, "pca_dim": d, "pca_fit_s": pca_time, **res})
                     print(f"{encoding:14s} {category:10s} seed={seed} "
-                          f"dim={orig_dim:6d}->{res['dim']:6d} AP test={res['ap_test']:.3f}")
+                          f"dim={orig_dim:6d}->{res['dim']:6d} AP val={res['ap_val']:.3f} "
+                          f"test={res['ap_test']:.3f}")
     return pd.DataFrame(rows)
 
 
-def summarize(grid, encodings_info):
-    pd.set_option("display.width", 220)
-    pd.set_option("display.max_columns", 30)
-
-    # Average over categories first (mAP per seed), then mean/std over seeds.
-    per_seed = (grid.groupby(["encoding", "pca_dim", "seed"], sort=False)
-                .agg(mAP=("ap_test", "mean"), acc=("acc_test", "mean"), f1=("f1_test", "mean"),
-                     orig_dim=("orig_dim", "first"), dim=("dim", "first"),
-                     pca_fit_s=("pca_fit_s", "mean"), train_s=("train_time_s", "mean"),
-                     infer_ms=("infer_ms_per_image", "mean")))
-    table = per_seed.groupby(level=["encoding", "pca_dim"], sort=False).agg(
+def summarize(grid, costs):
+    """One row per (encoding, pca_dim): mAP over categories, then mean/std over seeds."""
+    keys = ["encoding", "type", "K", "pca_dim"]
+    per_seed = grid.groupby(keys + ["seed"], sort=False).agg(
+        mAP_val=("ap_val", "mean"), mAP_test=("ap_test", "mean"),
+        acc_test=("acc_test", "mean"), f1_test=("f1_test", "mean"),
+        orig_dim=("orig_dim", "first"), dim=("dim", "first"), pca_fit_s=("pca_fit_s", "mean"),
+        svm_train_s=("train_time_s", "mean"), infer_us=("infer_ms_per_image", lambda s: 1000 * s.mean()))
+    summary = per_seed.groupby(keys, sort=False).agg(
         orig_dim=("orig_dim", "first"), dim=("dim", "first"),
-        mAP=("mAP", "mean"), mAP_std=("mAP", "std"), acc=("acc", "mean"), f1=("f1", "mean"),
-        pca_fit_s=("pca_fit_s", "mean"), train_s=("train_s", "mean"), infer_ms=("infer_ms", "mean"))
-    table["removed_%"] = 100 * (1 - table["dim"] / table["orig_dim"])
-    table["kb_per_image_f32"] = table["dim"] * 4 / 1024
+        mAP_val=("mAP_val", "mean"), mAP_test=("mAP_test", "mean"), mAP_test_std=("mAP_test", "std"),
+        acc_test=("acc_test", "mean"), f1_test=("f1_test", "mean"), pca_fit_s=("pca_fit_s", "mean"),
+        svm_train_s=("svm_train_s", "mean"), infer_us=("infer_us", "mean")).reset_index()
+    summary["removed_%"] = 100 * (1 - summary["dim"] / summary["orig_dim"])
+    summary["kb_per_image"] = summary["dim"] * 4 / 1024  # float32
+    return summary.merge(costs, on="encoding", how="left")
 
-    print("\n=== Per representation and PCA dimension (0 = no PCA); mean over categories ===")
-    print(table.round(3).to_string())
 
-    print("\n=== Same final dimension: BoVW K=d (D) vs. larger K + PCA to d (C), test mAP ===")
-    bovw = table.reset_index()
-    bovw = bovw[bovw["encoding"].str.startswith("bovw")]
-    matched = []
-    for d in sorted(bovw.loc[bovw["pca_dim"] > 0, "pca_dim"].unique()):
-        row = {"final_dim": d}
-        direct = bovw[(bovw["pca_dim"] == 0) & (bovw["orig_dim"] == d)]
-        if len(direct):
-            row["direct K=d (no PCA)"] = direct["mAP"].iloc[0]
-        for _, r in bovw[bovw["pca_dim"] == d].iterrows():
-            row[f"K={r['orig_dim']} + PCA"] = r["mAP"]
-        matched.append(row)
-    print(pd.DataFrame(matched).set_index("final_dim").round(3).to_string())
+def conditionsTable(summary, small_k, large_k):
+    """Rows A/B/C/D of the assignment table, taken from the BoVW summary."""
+    bovw = summary[summary["type"] == "bovw"]
+    no_pca = bovw[bovw["pca_dim"] == 0]
+    parts = [no_pca[no_pca["K"] == small_k].assign(condition="A"),
+             no_pca[no_pca["K"] == large_k].assign(condition="B")]
+    c_rows = bovw[(bovw["K"] == large_k) & (bovw["pca_dim"] > 0)]
+    parts.append(c_rows.assign(condition="C"))
+    parts.append(no_pca[no_pca["K"].isin(c_rows["pca_dim"])].assign(condition="D"))
+    table = pd.concat(parts)
+    return table[["condition", "encoding", "pca_dim", "dim", "mAP_val", "mAP_test", "mAP_test_std",
+                  "acc_test", "f1_test", "codebook_fit_s", "encode_ms_per_image",
+                  "pca_fit_s", "svm_train_s", "infer_us", "kb_per_image"]]
 
-    print("\n=== Per category test AP (mean over seeds) ===")
-    print(grid.pivot_table(index=["encoding", "pca_dim"], columns="category",
-                           values="ap_test", sort=False).round(3).to_string())
 
-    print("\n=== Encoding cost (per image) and storage ===")
-    print(encodings_info.round(3).to_string(index=False))
+def matchedTable(summary):
+    """Test mAP: rows = (type, final dimension), columns = codebook K.
+
+    Each row compares codebooks at the same final dimension. For BoVW the
+    diagonal (K = d) is the codebook used directly and the cells to its right
+    are larger codebooks compressed with PCA to d.
+    """
+    return summary.pivot_table(index=["type", "dim"], columns="K", values="mAP_test")
+
+
+def plotMapVsDim(summary, path):
+    """Test mAP vs. final dimension; one line per codebook (PCA dims + no-PCA end)."""
+    ramps = {5: ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"],
+             3: ["#86b6ef", "#3987e5", "#0d366b"]}  # one hue, light -> dark = small -> large K
+    types = [t for t in ["bovw", "vlad", "fv"] if t in set(summary["type"])]
+    fig, axes = plt.subplots(1, len(types), figsize=(5 * len(types), 4), sharey=True, squeeze=False)
+    for ax, enc_type in zip(axes[0], types):
+        df = summary[summary["type"] == enc_type]
+        # Codebooks with at least one PCA point are drawn as lines.
+        ks = sorted(k for k, g in df.groupby("K") if (g["pca_dim"] > 0).any())
+        colors = ramps[5] if len(ks) > 3 else ramps[3]
+        for color, K in zip(colors[-len(ks):], ks):
+            g = df[df["K"] == K].sort_values("dim")
+            ax.errorbar(g["dim"], g["mAP_test"], yerr=g["mAP_test_std"].fillna(0), color=color,
+                        lw=2, marker="o", ms=5, capsize=2, label=f"K={K} (+ PCA)")
+        if enc_type == "bovw":
+            direct = df[df["pca_dim"] == 0].sort_values("dim")
+            ax.plot(direct["dim"], direct["mAP_test"], color="#52514e", ls="--", lw=1.5,
+                    marker="s", ms=6, label="K = d, no PCA")
+        ax.set_xscale("log", base=2)
+        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+        ax.set_title(enc_type.upper())
+        ax.set_xlabel("Final feature dimension")
+        ax.grid(alpha=0.25, lw=0.5)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.legend(frameon=False, fontsize=8)
+    axes[0][0].set_ylabel("Test mAP (mean over categories)")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
 
 
 def parseArgs():
     parser = argparse.ArgumentParser(description="Run Part 3 (large vocabulary + PCA) experiments.")
-    parser.add_argument("--encodings", nargs="+", default=None,
-                        help="Restrict to these encodings (default: all of DEFAULT_CONFIGS that exist)")
+    parser.add_argument("--encodings", nargs="+", default=DEFAULT_ENCODINGS,
+                        help="Encodings to evaluate; missing ones are skipped")
     parser.add_argument("--categories", nargs="+", default=CATEGORIES)
     parser.add_argument("--pca-dims", nargs="+", type=int, default=[32, 64, 128, 256, 512])
+    parser.add_argument("--small-k", type=int, default=256, help="Condition A codebook")
+    parser.add_argument("--large-k", type=int, default=1024, help="Conditions B/C codebook")
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument("--subsample", type=float, default=0.9,
                         help="Stratified fraction of the training set used per seed (1.0 = all)")
@@ -148,22 +213,41 @@ def parseArgs():
 
 if __name__ == "__main__":
     args = parseArgs()
-    out_dir = Path(args.out)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    pd.set_option("display.width", 220)
+    pd.set_option("display.max_columns", 30)
 
-    configs = [c for c in DEFAULT_CONFIGS if (ENCODINGS_DIR / c[0]).is_dir()]
-    if args.encodings:
-        configs = [c for c in configs if c[0] in args.encodings]
-    missing = [c[0] for c in DEFAULT_CONFIGS if not (ENCODINGS_DIR / c[0]).is_dir()]
-    print("Encodings:", ", ".join(c[0] for c in configs))
+    encodings = [e for e in args.encodings if (ENCODINGS_DIR / e).is_dir()]
+    missing = [e for e in args.encodings if e not in encodings]
+    print("Encodings:", ", ".join(encodings))
     if missing:
         print("Missing (skipped):", ", ".join(missing))
 
-    encodings_info = measureEncodings([c[0] for c in configs], args.timing_images)
-    encodings_info.to_csv(out_dir / "part3_encodings.csv", index=False)
+    # Per-encoder costs: codebook fitting (from the encoder .npz), SIFT and encoding per image.
+    costs = measureEncodings(encodings, args.timing_images).reindex(
+        columns=["encoding", "codebook_fit_s", "sift_ms_per_image", "encode_ms_per_image"])
 
-    grid = runGrid(configs, args.categories, args.pca_dims, args.seeds, args.subsample, args.C)
-    grid.to_csv(out_dir / "part3_grid.csv", index=False)
+    grid = runGrid(encodings, args.categories, args.pca_dims, args.seeds, args.subsample, args.C)
+    summary = summarize(grid, costs)
+    conditions = conditionsTable(summary, args.small_k, args.large_k)
+    matched = matchedTable(summary)
+    per_class = grid[grid["pca_dim"] == 0].pivot_table(
+        index="encoding", columns="category", values="ap_test", sort=False)
 
-    summarize(grid, encodings_info)
-    print(f"\nResults written to {out_dir.resolve()}")
+    grid.to_csv(out / "part3_grid.csv", index=False)
+    summary.to_csv(out / "part3_summary.csv", index=False)
+    conditions.to_csv(out / "part3_conditions.csv", index=False)
+    matched.to_csv(out / "part3_matched.csv")
+    per_class.to_csv(out / "part3_per_class.csv")
+    plotMapVsDim(summary, out / "part3_map_vs_dim.png")
+
+    print("\n=== Q1: test AP per category, no PCA ===")
+    print(per_class.round(3).to_string())
+    print("\n=== Q2/Q4/Q5: every representation and PCA dimension (0 = no PCA) ===")
+    print(summary.drop(columns=["type", "K"]).round(3).to_string(index=False))
+    print(f"\n=== Q3: assignment conditions (A: K={args.small_k}, B/C: K={args.large_k}) ===")
+    print(conditions.round(3).to_string(index=False))
+    print("\n=== Q3/Q5: test mAP at the same final dimension (rows) per codebook K (cols) ===")
+    print(matched.round(3).to_string())
+    print(f"\nResults written to {out.resolve()}")
