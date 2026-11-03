@@ -40,7 +40,7 @@ FEATURE_MAPS = {
 # Handcrafted baselines: settings selected on validation AP in Part 2.
 BASELINES = [
     ("bovw_K512_C0", True, "sqrt_l2"),
-    ("vlad_K32_C80", True, "ssr_l2"),
+    ("vlad_K32_C80", True, "ssr_intra_l2"),
     ("fv_K32_C80", True, "ssr_l2"),
 ]
 

@@ -304,9 +304,127 @@ def reportPart4(results):
             lines += [f"Confusion matrix (test) — `{csv.stem.removeprefix('part4_dino_confusion_')}` "
                       "(rows: true, columns: predicted):", "", md(cm, floatfmt=".0f"), ""]
 
-    lines += ["## Stages C–F", "", "> **Pending:** few-shot and augmentation (C), choice of C (D), "
-              "CLIP zero-shot (E) and visual analysis (F) have no script yet.", ""]
+    lines += fewShotSection(results)
+    lines += clipSection(results)
+
+    lines += ["## Stage F — visual analysis and failure cases", ""]
+    figures = sorted(results.glob("part4_examples_*.png"))
+    if not figures:
+        lines += pending("Stage F", "python -m runs.run_part4_visual")
+    else:
+        lines += ["Per category: highest-scoring positives (TP), highest-scoring background images (FP) and "
+                  "lowest-scoring positives (FN) on the test set. ResNet-18 and DINOv2 maps are exact "
+                  "decompositions of the SVM score over image positions (positive part shown); CLIP has no map. "
+                  "Image ids and scores are in `part4_examples.csv`.", ""]
+        lines += [f"![{png.stem}]({png.name})\n" for png in figures]
+
+    lines += comparisonSection(results)
     return lines + questions(4)
+
+
+def fewShotSection(results):
+    lines = ["## Stage C — few-shot learning and flip augmentation", ""]
+    fewshot = read(results, "part4_fewshot.csv")
+    if fewshot is None:
+        return lines + pending("Stages C and D", "python -m runs.run_part4_fewshot")
+
+    sizes = sorted(fewshot.loc[~fewshot["all_pos"], "num_pos"].unique())
+    label = fewshot["num_pos"].astype(str).where(~fewshot["all_pos"], "all")
+    fewshot = fewshot.assign(positives=pd.Categorical(label, [str(s) for s in sizes] + ["all"], ordered=True))
+    table = (fewshot.groupby(["category", "aug", "positives"], observed=True)["ap_val"]
+             .apply(meanStd).unstack("positives"))
+    per_seed = fewshot.groupby(["aug", "positives", "seed"], observed=True)["ap_val"].mean()
+    mean = per_seed.groupby(level=["aug", "positives"], observed=True).apply(meanStd).unstack("positives")
+    table = pd.concat([table, pd.concat({"mAP": mean}, names=["category"])])
+    lines += ["Validation AP (mean ± std over random draws of the positives) against the number of positive "
+              "training images. Negatives: every background training image. `flip` adds the flipped training "
+              "images; validation images are never flipped. `all` is a single draw.", "", md(table), "",
+              "![part4_fewshot](part4_fewshot.png)", ""]
+
+    tta = read(results, "part4_tta.csv")
+    if tta is not None:
+        cols = ["no_tta", "score_avg", "feature_avg"]
+        lines += ["Test-time flip as a separate condition (all positives, validation AP): `score_avg` averages "
+                  "the SVM scores of an image and its flip, `feature_avg` scores the feature map of the mean raw "
+                  "feature.", "", md(tta.groupby("train_aug")[cols].mean().rename_axis("train_aug (mAP)"), ".4f"), ""]
+
+    lines += ["## Stage D — choice of the SVM C", ""]
+    sweep, test = read(results, "part4_svm_c.csv"), read(results, "part4_svm_c_test.csv")
+    if sweep is not None:
+        per_seed = sweep.groupby(["regime", "C", "seed"], sort=False)[["ap_train", "ap_val"]].mean()
+        table = per_seed.groupby(level=["regime", "C"], sort=False).agg(meanStd)
+        lines += ["Train and validation mAP (mean ± std over draws) per C, with 5 and with all positives.", "",
+                  md(table), "", "![part4_svm_c](part4_svm_c.png)", ""]
+    if test is not None:
+        lines += ["C selected per regime on validation mAP, evaluated once on the test set (test AP, mean over "
+                  "draws):", "", md(withMAP(test.pivot_table(index=["regime", "C"], columns="category",
+                                                             values="ap_test"))), ""]
+    return lines
+
+
+def clipSection(results):
+    lines = ["## Stage E — CLIP zero-shot classification", ""]
+    prompts = read(results, "part4_clip_prompts.csv")
+    if prompts is None:
+        return lines + pending("Stage E", "python -m runs.run_part4_clip")
+    lines += ["Validation AP per prompt set (ranking each category's positives vs. background by cosine "
+              "similarity to the class text embedding). Only the best set is evaluated on test.", "",
+              md(prompts.set_index("prompt_set")), ""]
+
+    test = read(results, "part4_clip_test.csv")
+    if test is not None:
+        lines += ["Test AP: zero-shot with the selected prompts vs. the Part 1 linear SVM on the same CLIP image "
+                  "embeddings.", "", md(test.set_index("category")), ""]
+    if (results / "part4_clip_confusion.csv").exists():
+        cm = pd.read_csv(results / "part4_clip_confusion.csv", index_col=0)
+        lines += ["Zero-shot classification of single-category test images (argmax over the 5 class prompts and "
+                  "a background prompt; rows: true, columns: predicted):", "", md(cm, floatfmt=".0f"), ""]
+    report = read(results, "part4_clip_classification.csv")
+    if report is not None:
+        lines += [md(report.set_index(report.columns[0]).rename_axis("class")), ""]
+    costs = read(results, "part4_clip_costs.csv")
+    if costs is not None:
+        lines += ["Costs:", "", md(costs.set_index("encoding"), ".4f"), ""]
+    return lines
+
+
+def comparisonSection(results):
+    """The required comparison table, from the Part 4 results."""
+    lines = ["## Required comparison table", ""]
+    supervision = {"bovw": "Task labels", "vlad": "Task labels", "fv": "Task labels",
+                   "resnet18": "Pretrained (ImageNet) + task labels", "dinov2": "Self-supervised + task labels"}
+    parts = []
+    for grid_name, info_name in [("part4_resnet_grid.csv", "part4_resnet_encodings.csv"),
+                                 ("part4_dino_grid.csv", "part4_dino_encodings.csv")]:
+        grid, info = read(results, grid_name), read(results, info_name)
+        if grid is None or info is None:
+            continue
+        selected = selectOnVal(grid, ["feature_map"])
+        selected = selected[selected["encoding"].str.split("_").str[0].isin(supervision)]
+        part = (selected.groupby("encoding", sort=False)
+                .agg(mAP=("ap_test", "mean"), inference_ms_per_image=("infer_ms_per_image", "mean"))
+                .join(info.set_index("encoding")[["dim", "extract_ms_per_image"]]))
+        part.insert(0, "supervision", [supervision[e.split("_")[0]] for e in part.index])
+        parts.append(part)
+
+    test, costs = read(results, "part4_clip_test.csv"), read(results, "part4_clip_costs.csv")
+    if test is not None and costs is not None:
+        zero_shot = [c for c in test.columns if c.startswith("zero_shot")][0]
+        parts.append(pd.DataFrame([{
+            "supervision": "Image-text pretraining, no task labels",
+            "mAP": test.set_index("category").loc["mAP", zero_shot],
+            "inference_ms_per_image": costs["infer_us_per_image"].iloc[0] / 1000,
+            "dim": costs["dim"].iloc[0], "extract_ms_per_image": costs["extract_ms_per_image"].iloc[0],
+        }], index=[f"clip_vit_b_32 {zero_shot}"]))
+    if not parts:
+        return lines + pending("comparison table", "the Part 4 scripts")
+    table = pd.concat(parts)
+    table = table[~table.index.duplicated()]  # ResNet layer4 can appear in both grids
+    lines += ["Test mAP over the 5 categories with the setting selected on validation. Extraction: SIFT + "
+              "encoding (handcrafted, a few images) or one forward pass on CPU (deep). Inference: feature map + "
+              "classifier (or text similarity) per image, excluding extraction.", "",
+              md(table.rename_axis("method"), ".4f"), ""]
+    return lines
 
 
 REPORTS = {1: reportPart1, 2: reportPart2, 3: reportPart3, 4: reportPart4}
@@ -327,5 +445,5 @@ if __name__ == "__main__":
 
     for part in args.parts:
         out_file = results / f"report_part{part}.md"
-        out_file.write_text("\n".join(REPORTS[part](results)) + "\n")
+        out_file.write_text("\n".join(REPORTS[part](results)) + "\n", encoding="utf-8")
         print(f"Wrote {out_file}")

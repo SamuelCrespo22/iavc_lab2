@@ -1,0 +1,2 @@
+encoding,dim,kb_per_image,extract_ms_per_image,device,prompt_set,num_prompts,text_encode_s,infer_us_per_image
+clip_vit_b_32,512,2.0,35.18185129397492,cpu,photo,6,0.21740390000013576,2.9475365991643927

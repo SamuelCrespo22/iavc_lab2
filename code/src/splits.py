@@ -101,12 +101,13 @@ def writeProtocolSplits(split_dir="data/splits", out_dir="data/splits_protocol",
 
 
 def loadProtocolSubset(category, encoding, subset="train", root_dir="data",
-                       protocol_dir="data/splits_protocol"):
+                       protocol_dir="data/splits_protocol", key="histograms"):
     """Load positive (category) and negative (background) encodings for a protocol subset.
 
     'train' and 'val' rows come from the supplied ``*_train.npz`` encodings and
     'test' rows from the supplied ``*_val.npz`` encodings, filtered by the
-    image lists written by ``writeProtocolSplits``.
+    image lists written by ``writeProtocolSplits``. ``key`` selects the array
+    ("histograms_flip" for the flipped images stored by src.extract_deep --flip).
 
     Returns:
         hist, labels (+1 / -1), names, in the same format as ``loadEncodingSubset``.
@@ -121,7 +122,7 @@ def loadProtocolSubset(category, encoding, subset="train", root_dir="data",
         data = np.load(f"{root_dir}/encodings/{encoding}/{cat}_{source}.npz")
         mask = np.isin(data["file_names"], list(keep))
         assert mask.sum() == len(keep), f"{cat}_{subset}: {len(keep) - mask.sum()} images missing in encodings"
-        hists.append(data["histograms"][mask])
+        hists.append(data[key][mask])
         names.append(data["file_names"][mask])
         labels.append(np.full(mask.sum(), label, dtype=np.int32))
 

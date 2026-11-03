@@ -83,25 +83,18 @@ def loadMultiClassTest(encoding, categories):
     return names, np.stack([feats[n] for n in names]), [labels[n] for n in names]
 
 
-def confusionMatrix(encoding, fm, models, categories, out_dir):
-    names, x, label_sets = loadMultiClassTest(encoding, categories)
-    x = transformFor(fm)(x)
-    scores = np.stack([x @ models[encoding, fm, c][0] + models[encoding, fm, c][1]
-                       for c in categories], axis=1)
-
+def singleLabels(label_sets):
+    """``(keep, true)``: images with at most one category and their class name."""
     true = [next(iter(s - {"background"} or s)) if len(s - {"background"}) <= 1 else None
             for s in label_sets]
     keep = np.array([t is not None for t in true])
-    true = np.array([t for t in true if t is not None])
-    scores = scores[keep]
-    best = np.array(categories)[np.argmax(scores, axis=1)]
-    pred = np.where(scores.max(axis=1) > 0, best, "background")
+    return keep, np.array([t for t in true if t is not None])
 
-    classes = categories + ["background"]
-    cm = confusion_matrix(true, pred, labels=classes)
+
+def saveConfusion(cm, classes, title, path):
+    """Write the confusion matrix as <path>.csv and <path>.png."""
     pd.DataFrame(cm, index=pd.Index(classes, name="true"), columns=pd.Index(classes, name="pred")).to_csv(
-        out_dir / f"part4_dino_confusion_{encoding}.csv")
-
+        path.with_suffix(".csv"))
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.imshow(cm, cmap="Blues")
     for i in range(len(classes)):
@@ -112,10 +105,27 @@ def confusionMatrix(encoding, fm, models, categories, out_dir):
     ax.set_yticks(range(len(classes)), classes)
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
-    ax.set_title(f"{encoding} ({fm}): test confusion matrix")
+    ax.set_title(title)
     fig.tight_layout()
-    fig.savefig(out_dir / f"part4_dino_confusion_{encoding}.png", dpi=150)
+    fig.savefig(path.with_suffix(".png"), dpi=150)
     plt.close(fig)
+
+
+def confusionMatrix(encoding, fm, models, categories, out_dir):
+    names, x, label_sets = loadMultiClassTest(encoding, categories)
+    x = transformFor(fm)(x)
+    scores = np.stack([x @ models[encoding, fm, c][0] + models[encoding, fm, c][1]
+                       for c in categories], axis=1)
+
+    keep, true = singleLabels(label_sets)
+    scores = scores[keep]
+    best = np.array(categories)[np.argmax(scores, axis=1)]
+    pred = np.where(scores.max(axis=1) > 0, best, "background")
+
+    classes = categories + ["background"]
+    cm = confusion_matrix(true, pred, labels=classes)
+    saveConfusion(cm, classes, f"{encoding} ({fm}): test confusion matrix",
+                  out_dir / f"part4_dino_confusion_{encoding}")
 
     objects = true != "background"
     print(f"\n=== {encoding} ({fm}): confusion matrix on {keep.sum()} test images "

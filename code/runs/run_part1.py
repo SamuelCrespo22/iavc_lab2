@@ -43,8 +43,9 @@ def removeSpatialInformation(histograms: np.ndarray) -> np.ndarray:
     Returns:
         Array of shape ``(N, num_words)`` with the tile dimension averaged.
     """
+    # Tiles are stored one after the other: [tile 0 | tile 1 | tile 2 | tile 3].
     N = histograms.shape[0]
-    return np.mean(np.reshape(histograms, (N, -1, 4)), axis=2)
+    return np.mean(np.reshape(histograms, (N, NUM_TILES, -1)), axis=1)
 
 
 def l1(x):
