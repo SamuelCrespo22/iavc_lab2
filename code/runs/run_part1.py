@@ -1,4 +1,4 @@
-"""Part 1 experiments: BoVW + linear SVM over every option of the assignment.
+"""Part 1 experiments: BoVW + linear SVM.
 
 Runs, for each category (positives vs. background) on the protocol splits:
 
@@ -8,11 +8,11 @@ Runs, for each category (positives vs. background) on the protocol splits:
             linear (L2) vs. Hellinger feature map.
 
 Results are written to <out>/part1_grid.csv, <out>/part1_fractions.csv and
-<out>/part1_fractions_<category>.png.
+<out>/part1_fractions.png. Example images, ranked lists, PR curves and visual
+words (Stages A-D) are drawn by runs.run_part1_inspect.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part1
-    python -m runs.run_part1 --categories motorbike --ks 512 --skip-fractions
 """
 
 import argparse
@@ -24,7 +24,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, average_precision_score, f1_score
+from sklearn.metrics import (accuracy_score, average_precision_score, confusion_matrix, f1_score,
+                             precision_score, recall_score)
 
 from src import utils
 from src.splits import loadProtocolSubset
@@ -32,20 +33,6 @@ from src.splits import loadProtocolSubset
 CATEGORIES = ["motorbike", "aeroplane", "person", "horse", "car"]
 KS = [256, 512, 1024]
 NUM_TILES = 4
-
-
-def removeSpatialInformation(histograms: np.ndarray) -> np.ndarray:
-    """Average four spatially tiled histograms into one histogram per image.
-
-    Args:
-        histograms: Array of shape ``(N, num_words * 4)``.
-
-    Returns:
-        Array of shape ``(N, num_words)`` with the tile dimension averaged.
-    """
-    # Tiles are stored one after the other: [tile 0 | tile 1 | tile 2 | tile 3].
-    N = histograms.shape[0]
-    return np.mean(np.reshape(histograms, (N, NUM_TILES, -1)), axis=1)
 
 
 def l1(x):
@@ -56,7 +43,6 @@ def l2(x):
     return x / np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-12)
 
 
-# Feature maps applied to the raw count histograms. "sqrt_l2" is the Hellinger
 # map: sqrt(h) / ||sqrt(h)||_2 == sqrt(h / ||h||_1).
 FEATURE_MAPS = {
     "none": lambda h: h,
@@ -64,8 +50,25 @@ FEATURE_MAPS = {
     "l2": l2,
     "sqrt": np.sqrt,
     "sqrt_l1": lambda h: l1(np.sqrt(h)),
-    "sqrt_l2": lambda h: l2(np.sqrt(h)),
+    "sqrt_l2": lambda h: l2(np.sqrt(h)), # Hellinger
 }
+
+
+def removeSpatialInformation(histograms: np.ndarray) -> np.ndarray:
+    """Sum four spatially tiled histograms into one global histogram per image.
+
+    Every keypoint falls in exactly one tile, so the sum equals the histogram of
+    the whole image (the mean would be that histogram / 4).
+
+    Args:
+        histograms: Array of shape ``(N, num_words * 4)``.
+
+    Returns:
+        Array of shape ``(N, num_words)`` with the tile dimension summed.
+    """
+    # Tiles are stored one after the other: [tile 0 | tile 1 | tile 2 | tile 3].
+    N = histograms.shape[0]
+    return np.sum(np.reshape(histograms, (N, NUM_TILES, -1)), axis=1)
 
 
 def loadData(category, encoding):
@@ -102,9 +105,14 @@ def trainAndEvaluate(data, transform, C, train_subset=None, return_model=False):
             result["infer_ms_per_image"] = 1000 * (time.perf_counter() - start) / len(y)
             top = np.argsort(scores)[::-1][:36]
             result["test_top36_pos"] = int((y[top] > 0).sum())
+            # Classification at the SVM's own operating threshold, score > 0.
             pred = np.where(scores > 0, 1, -1)
             result["acc_test"] = accuracy_score(y, pred)
             result["f1_test"] = f1_score(y, pred, average="macro")
+            result["precision_test"] = precision_score(y, pred, zero_division=0)
+            result["recall_test"] = recall_score(y, pred)
+            (tn, fp), (fn, tp) = confusion_matrix(y, pred, labels=[-1, 1])
+            result.update(tp_test=int(tp), fp_test=int(fp), fn_test=int(fn), tn_test=int(tn))
         result[f"ap_{subset}"] = average_precision_score(y, scores)
     return (result, (W, b)) if return_model else result
 
@@ -126,13 +134,17 @@ def runGrid(categories, ks, feature_maps, C):
 
 
 def stratifiedSubset(labels, fraction, seed):
-    """Indices of a random subset keeping ``fraction`` of each class (at least one)."""
+    """Indices of a random subset keeping ``fraction`` of each class (at least one).
+
+    Each class is permuted once per seed and the first images are kept, so for
+    a fixed seed the subsets are nested: 10 % ⊂ 25 % ⊂ 50 % ⊂ 100 %.
+    """
     rng = np.random.default_rng(seed)
     sel = []
     for label in np.unique(labels):
         idx = np.flatnonzero(labels == label)
         num = len(idx) if fraction >= 1 else max(1, int(np.ceil(fraction * len(idx))))
-        sel.append(rng.choice(idx, size=num, replace=False))
+        sel.append(rng.permutation(idx)[:num])
     return np.concatenate(sel)
 
 
@@ -157,38 +169,42 @@ def runFractions(categories, K, spatial, fractions, seeds, C):
 
 
 def plotFractions(df, out_dir):
+    """One panel per category: validation AP vs. number of training images."""
     labels = {"l2": "linear (L2)", "sqrt_l2": "Hellinger"}
-    for category, cat_df in df.groupby("category"):
-        fig, ax = plt.subplots(figsize=(6, 4))
-        for feature_map, fm_df in cat_df.groupby("feature_map"):
+    categories = list(dict.fromkeys(df["category"]))
+    fig, axes = plt.subplots(1, len(categories), figsize=(3.6 * len(categories), 3.6), sharey=True, squeeze=False)
+    for ax, category in zip(axes[0], categories):
+        for feature_map, fm_df in df[df["category"] == category].groupby("feature_map"):
             stats = fm_df.groupby("num_train")["ap_val"].agg(["mean", "std"]).reset_index()
             ax.errorbar(stats["num_train"], stats["mean"], yerr=stats["std"].fillna(0),
                         marker="o", capsize=3, label=labels[feature_map])
         ax.set_xlabel("Number of training images")
-        ax.set_ylabel("Validation AP")
-        ax.set_title(f"{category}: AP vs. training set size")
+        ax.set_title(category)
         ax.grid(alpha=0.3)
-        ax.legend()
-        fig.tight_layout()
-        fig.savefig(out_dir / f"part1_fractions_{category}.png", dpi=150)
-        plt.close(fig)
+    axes[0][0].set_ylabel("Validation AP")
+    axes[0][0].legend()
+    fig.tight_layout()
+    fig.savefig(out_dir / "part1_fractions.png", dpi=150)
+    plt.close(fig)
 
 
 def summarize(grid, fractions):
     pd.set_option("display.width", 200)
     pd.set_option("display.max_columns", 30)
 
-    print("\n=== Test AP: feature map x spatial (rows) / category (cols), per K ===")
+    # Settings are compared on validation AP only; test AP is printed for the chosen one.
+    print("\n=== Val AP: feature map x spatial (rows) / category (cols), per K ===")
     for K, k_df in grid.groupby("K"):
         print(f"\nK = {K}")
         print(k_df.pivot_table(index=["spatial", "feature_map"], columns="category",
-                               values="ap_test").round(3))
+                               values="ap_val").round(3))
 
-    print("\n=== Best setting per category, selected on val AP ===")
-    best = grid.loc[grid.groupby("category")["ap_val"].idxmax()]
-    print(best[["category", "K", "spatial", "feature_map", "dim",
-                "ap_train", "ap_val", "ap_test"]].round(3).to_string(index=False))
-    print(f"mAP (test) of selected settings: {best['ap_test'].mean():.3f}")
+    # One setting for every category, as in runs.report: the best mean val AP.
+    K, spatial, feature_map = grid.groupby(["K", "spatial", "feature_map"])["ap_val"].mean().idxmax()
+    best = grid[(grid["K"] == K) & (grid["spatial"] == spatial) & (grid["feature_map"] == feature_map)]
+    print(f"\n=== Selected setting (best val mAP): K={K}, spatial={spatial}, {feature_map} ===")
+    print(best[["category", "dim", "ap_train", "ap_val", "ap_test"]].round(3).to_string(index=False))
+    print(f"mAP: val {best['ap_val'].mean():.3f}, test {best['ap_test'].mean():.3f}")
 
     if fractions is not None and len(fractions):
         print("\n=== Val AP vs. training fraction (mean +- std over seeds) ===")

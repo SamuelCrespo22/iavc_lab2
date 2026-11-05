@@ -74,10 +74,8 @@ def deepEncodingInfo(encoding):
     """Dimension, storage and extraction cost of an encoding written by src.extract_deep."""
     enc_dir = ENCODINGS_DIR / encoding
     meta = json.loads((enc_dir / "meta.json").read_text())
-    # Older ResNet meta.json files store {"dims": {layer: dim}} instead of "dim".
-    dim = meta["dim"] if "dim" in meta else meta["dims"][encoding.rsplit("_", 1)[1]]
-    return {"encoding": encoding, "dim": dim, "dtype": "float32",
-            "kb_per_image": dim * 4 / 1024,
+    return {"encoding": encoding, "dim": meta["dim"], "dtype": "float32",
+            "kb_per_image": meta["dim"] * 4 / 1024,
             "disk_mb": sum(f.stat().st_size for f in enc_dir.glob("*.npz")) / 2**20,
             "extract_ms_per_image": meta["extract_ms_per_image"],
             "device": meta["device"]}
@@ -95,6 +93,7 @@ def encodingsInfo(baselines, timing_images):
 
 
 def summarize(grid, info):
+    """Print test AP per setting and the feature map selected per encoding; returns the selection."""
     pd.set_option("display.width", 200)
     pd.set_option("display.max_columns", 30)
 
@@ -115,6 +114,7 @@ def summarize(grid, info):
     summary.insert(0, "feature_map", dict(best))
     summary["mAP"] = selected["mAP"]
     print(summary.round(3).to_string())
+    return best
 
 
 def parseArgs():

@@ -1,13 +1,18 @@
 """Part 4, Stage F: correct / incorrect examples and class-relevant regions.
 
 For each method and category, the test images (category positives vs.
-background) are ranked by the method's score and three groups are shown:
+background) are split by the method's decision and three groups are shown:
 
-  TP  highest-scoring positives
-  FP  highest-scoring background images (the most confident false alarms)
-  FN  lowest-scoring positives (the most clearly missed objects)
+  TP  correctly detected positives, highest scores first
+  FP  background images wrongly detected, highest scores first
+  FN  missed positives, lowest scores first
 
-The SVMs are the Part 1 linear SVM (L2 feature map, C = 10). The region maps
+Decision: SVM score above 0; for CLIP, the category's prompt being the most
+similar of the 6 class prompts (the Stage E classification). Only real errors
+are shown, so a category can have fewer than --num FP or FN.
+
+The SVMs are the Part 1 linear SVM (L2 feature map, C = 10), the settings
+selected on validation in Stages A / B. The region maps
 are exact decompositions of the SVM score, so they show what the classifier
 used, not an approximation of it:
 
@@ -21,8 +26,7 @@ used, not an approximation of it:
   clip      zero-shot cosine similarity to the class text embedding (prompt set
             selected on validation by run_part4_clip). Examples only, no map.
 
-FP and FN are ranking extremes: whether the SVM actually errs at threshold 0
-is in the `svm_positive` column. Only positive contributions are drawn
+Only positive contributions are drawn
 (evidence for the category), on the 224x224 centre crop the models see, with
 one colour scale per category. The script checks that every map averages back
 to its SVM score.
@@ -100,38 +104,47 @@ def loadBatch(names, preprocess):
 
 
 def testScores(method, category, clip_texts, C):
-    """Test labels, names and scores of one method; plus (W, b) for the SVMs."""
+    """Test labels, names, scores and predicted-positive flags of one method; plus (W, b) for the SVMs.
+
+    SVM: predicted positive when the score is above 0. CLIP: when the category's prompt is the
+    most similar of all class prompts (background included), as in the Stage E classification.
+    """
     data = loadData(category, METHODS[method][0])
     x_test, y_test, names = data["test"]
+    x_test = l2(x_test.astype(np.float64))
     if method == "clip":
-        return y_test, names, l2(x_test.astype(np.float64)) @ clip_texts[category], None
+        classes = list(clip_texts)
+        sims = x_test @ np.stack([clip_texts[c] for c in classes], axis=1)
+        pred = np.array(classes)[sims.argmax(axis=1)] == category
+        return y_test, names, sims[:, classes.index(category)], pred, None
     x_train, y_train, _ = data["train"]
     W, b = utils.train_svm(l2(x_train.astype(np.float64)), y_train, C=C)
-    return y_test, names, l2(x_test.astype(np.float64)) @ W + b, (W, b)
+    scores = x_test @ W + b
+    return y_test, names, scores, scores > 0, (W, b)
 
 
-def pickExamples(y, scores, num):
-    """``{group: indices}``: top positives, top negatives, bottom positives."""
+def pickExamples(y, scores, pred, num):
+    """``{group: indices}``: real errors only, the most confident first."""
     order = np.argsort(-scores)
-    pos, neg = order[y[order] > 0], order[y[order] < 0]
-    return {"TP": pos[:num], "FP": neg[:num], "FN": pos[::-1][:num]}
+    pos, neg = y[order] > 0, y[order] < 0
+    return {"TP": order[pos & pred[order]][:num],
+            "FP": order[neg & pred[order]][:num],
+            "FN": order[pos & ~pred[order]][::-1][:num]}
 
 
 def collect(method, categories, clip_texts, num, C):
     """Rows (category, group, rank, name, score) and the region maps, if any."""
     rows, maps = [], {}
     for category in categories:
-        y, names, scores, model = testScores(method, category, clip_texts, C)
-        picked = pickExamples(y, scores, num)
+        y, names, scores, pred, model = testScores(method, category, clip_texts, C)
+        picked = pickExamples(y, scores, pred, num)
         for group in GROUPS:
             for rank, i in enumerate(picked[group]):
                 rows.append({"method": method, "category": category, "group": group, "rank": rank,
-                             "name": names[i], "score": scores[i],
-                             # SVM decision at threshold 0; cosine similarities have no threshold.
-                             "svm_positive": bool(scores[i] > 0) if model is not None else None})
+                             "name": names[i], "score": scores[i]})
         map_fn = METHODS[method][1]
         if map_fn is not None:
-            idx = np.concatenate([picked[g] for g in GROUPS])
+            idx = np.concatenate([picked[g] for g in GROUPS]).astype(int)
             W, b = model
             m = map_fn(names[idx], W)
             # Sanity check: each map averages back to the SVM score.
@@ -147,14 +160,17 @@ def plotExamples(method, examples, maps, path):
     num = examples["rank"].max() + 1
     fig, axes = plt.subplots(len(categories), 3 * num, figsize=(1.7 * 3 * num, 1.9 * len(categories)),
                              squeeze=False)
+    for ax in axes.ravel():
+        ax.axis("off")  # a category can have fewer than `num` errors of a kind
     for r, category in enumerate(categories):
         rows = examples[examples["category"] == category]
         if maps:
             # One colour scale per category: the SVMs of different categories have different score ranges.
             vmax = np.percentile(np.concatenate([np.maximum(maps[category, n], 0).ravel()
                                                  for n in rows["name"]]), 99)
-        for c, row in enumerate(rows.itertuples()):
-            ax = axes[r][c]
+        for row in rows.itertuples():
+            ax = axes[r][GROUPS.index(row.group) * num + row.rank]
+            ax.axis("on")
             ax.imshow(CROP(Image.open(IMG_DIR / f"{row.name}.jpg").convert("RGB")))
             if maps:
                 ax.imshow(np.maximum(maps[category, row.name], 0), cmap="jet", alpha=0.45, vmin=0, vmax=vmax,
@@ -165,8 +181,8 @@ def plotExamples(method, examples, maps, path):
             ax.set_yticks([])
         axes[r][0].set_ylabel(category, fontsize=10)
     score = "cosine similarity" if method == "clip" else "SVM score"
-    fig.suptitle(f"{method} ({score}): TP highest-scoring positives | FP highest-scoring background | "
-                 f"FN lowest-scoring positives")
+    fig.suptitle(f"{method} ({score}): TP correct detections | FP background wrongly detected | "
+                 f"FN missed positives")
     fig.tight_layout()
     fig.savefig(path, dpi=120)
     plt.close(fig)

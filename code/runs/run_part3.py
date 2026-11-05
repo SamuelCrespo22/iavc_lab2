@@ -38,9 +38,8 @@ Outputs (in --out):
   part3_per_class.csv    test AP per category, no PCA                         (Q1)
   part3_map_vs_dim.png   test mAP vs. final dimension, one line per K         (Q1-Q3, Q5)
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part3
-    python -m runs.run_part3 --encodings bovw_K256_C0 bovw_K1024_C0 --categories motorbike --seeds 0
 """
 
 import argparse
@@ -162,31 +161,24 @@ def matchedTable(summary):
 
 
 def plotMapVsDim(summary, path):
-    """Test mAP vs. final dimension; one line per codebook (PCA dims + no-PCA end)."""
-    ramps = {5: ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"],
-             3: ["#86b6ef", "#3987e5", "#0d366b"]}  # one hue, light -> dark = small -> large K
+    """Test mAP vs. final dimension: one line per codebook, from its smallest PCA d to no PCA."""
     types = [t for t in ["bovw", "vlad", "fv"] if t in set(summary["type"])]
     fig, axes = plt.subplots(1, len(types), figsize=(5 * len(types), 4), sharey=True, squeeze=False)
     for ax, enc_type in zip(axes[0], types):
         df = summary[summary["type"] == enc_type]
-        # Codebooks with at least one PCA point are drawn as lines.
-        ks = sorted(k for k, g in df.groupby("K") if (g["pca_dim"] > 0).any())
-        colors = ramps[5] if len(ks) > 3 else ramps[3]
-        for color, K in zip(colors[-len(ks):], ks):
-            g = df[df["K"] == K].sort_values("dim")
-            ax.errorbar(g["dim"], g["mAP_test"], yerr=g["mAP_test_std"].fillna(0), color=color,
-                        lw=2, marker="o", ms=5, capsize=2, label=f"K={K} (+ PCA)")
+        for K, g in df.groupby("K"):
+            if (g["pca_dim"] > 0).any():
+                g = g.sort_values("dim")
+                ax.errorbar(g["dim"], g["mAP_test"], yerr=g["mAP_test_std"], marker="o", capsize=2,
+                            label=f"K={K} + PCA")
         if enc_type == "bovw":
             direct = df[df["pca_dim"] == 0].sort_values("dim")
-            ax.plot(direct["dim"], direct["mAP_test"], color="#52514e", ls="--", lw=1.5,
-                    marker="s", ms=6, label="K = d, no PCA")
+            ax.plot(direct["dim"], direct["mAP_test"], "k--s", label="K = d, no PCA")
         ax.set_xscale("log", base=2)
-        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
         ax.set_title(enc_type.upper())
         ax.set_xlabel("Final feature dimension")
-        ax.grid(alpha=0.25, lw=0.5)
-        ax.spines[["top", "right"]].set_visible(False)
-        ax.legend(frameon=False, fontsize=8)
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8)
     axes[0][0].set_ylabel("Test mAP (mean over categories)")
     fig.tight_layout()
     fig.savefig(path, dpi=150)

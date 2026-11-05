@@ -5,6 +5,8 @@ its official preprocessing. Each model yields one or more encodings:
 
     resnet18        resnet18_layer2 / _layer3 / _layer4   GAP of the final 3
                     stages (128 / 256 / 512-d), ImageNet torchvision weights
+    vit_b_32        vit_b_32                  class token after the final norm (768-d),
+                                              ImageNet torchvision weights
     dinov2_vits14   dinov2_vits14_cls         CLS token after the final norm (384-d)
                     dinov2_vits14_patchmean   mean of the 256 patch tokens (384-d)
     clip_vit_b_32   clip_vit_b_32             CLIP image embedding (512-d), the
@@ -14,7 +16,8 @@ Each encoding is saved as <output-dir>/<encoding>/<category>_<train|val>.npz
 with the same keys as src.extract ("file_names", "histograms"), so the protocol
 splits and loaders apply unchanged. With --flip, the descriptors of the
 horizontally flipped images are stored too ("histograms_flip"). A meta.json in
-each folder records the model, device, dimension and extraction time.
+each folder records the model, weights, hardware, versions, dimension and
+extraction time.
 
 Usage (from the directory containing README.md):
     python -m src.extract_deep                          # resnet18
@@ -31,10 +34,12 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 import torch
 
 import json
+import platform
 import time
 from pathlib import Path
 
 import numpy as np
+import torchvision
 from PIL import Image
 
 from .deep_models import IntermediateFeatureExtractor, getModel
@@ -64,6 +69,16 @@ def dinov2Model(device):
     return preprocess, describe
 
 
+def vitModel(device):
+    # With the classification head replaced by Identity, the forward pass returns
+    # the class token after the final LayerNorm.
+    model, preprocess = getModel("vit_b_32", device=device)
+
+    def describe(x):
+        return {"vit_b_32": model(x)}
+    return preprocess, describe
+
+
 def clipModel(device):
     model, preprocess = getModel("clip_vit_b_32", device=device)
 
@@ -75,8 +90,17 @@ def clipModel(device):
 # model name -> builder returning (preprocess, describe(batch) -> {encoding: (B, C)})
 MODELS = {
     "resnet18": resnet18Model,
+    "vit_b_32": vitModel,
     "dinov2_vits14": dinov2Model,
     "clip_vit_b_32": clipModel,
+}
+
+# Pretrained weights loaded by src.deep_models.getModel, recorded in meta.json.
+WEIGHTS = {
+    "resnet18": "torchvision ResNet18_Weights.IMAGENET1K_V1",
+    "vit_b_32": "torchvision ViT_B_32_Weights.IMAGENET1K_V1",
+    "dinov2_vits14": "torch.hub facebookresearch/dinov2 dinov2_vits14",
+    "clip_vit_b_32": "openai/CLIP ViT-B/32",
 }
 
 
@@ -147,9 +171,12 @@ def extractModel(model_name, split_dir="data/splits", img_dir="data/images",
                 arrays["histograms_flip"] = feats[f"{encoding}_flip"][idx]
             np.savez_compressed(out_dir / f"{category}_{source}.npz", **arrays)
         metas[encoding] = {
-            "model_name": model_name, "device": device, "num_images": len(names), "flip": flip,
-            "dim": int(feats[encoding].shape[1]), "extract_time_s": total_time,
-            # One forward pass yields all encodings of the model (two passes with flip).
+            "model_name": model_name, "weights": WEIGHTS[model_name], "device": device,
+            "cpu": platform.processor(), "torch": torch.__version__, "torchvision": torchvision.__version__,
+            "num_images": len(names), "flip": flip, "dim": int(feats[encoding].shape[1]),
+            "extract_time_s": total_time,
+            # One forward pass yields all encodings of the model (two passes with flip). The
+            # time includes model loading, JPEG decoding and preprocessing.
             "extract_ms_per_image": 1000 * total_time / len(names) / (2 if flip else 1),
         }
         (out_dir / "meta.json").write_text(json.dumps(metas[encoding], indent=2))

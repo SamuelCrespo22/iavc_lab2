@@ -65,9 +65,10 @@ class RelevantVisualWordsDisplay:
         hist = np.sqrt(hist) # Hellinger kernel
         hist = hist / (np.sum(hist**2) + 1e-10)**0.5 # L2 normalize
     
-        # fold the w vetor, which may have been computed with spatial subdivisions
-        w_ = w.reshape(hist.shape[0],-1)
-        w_ = np.mean(w_, axis=1) # average the weights for each visual word
+        # fold the w vetor, which may have been computed with spatial subdivisions;
+        # tiles are stored one after the other: [tile 0 | tile 1 | tile 2 | tile 3]
+        w_ = w.reshape(-1, hist.shape[0])
+        w_ = np.mean(w_, axis=0) # average the weights for each visual word
         weights = w_ * hist # get weights for each visual word
 
         self.img = img

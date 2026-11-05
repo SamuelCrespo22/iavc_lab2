@@ -1,7 +1,6 @@
 """Part 2 experiments: VLAD and Fisher Vectors vs. BoVW with a linear SVM.
 
-For each encoding in data/encodings (by default BoVW K=512 plus every vlad_*
-and fv_* found) and each category, trains the same linear SVM as Part 1 on the
+For each encoding in data/encodings and each category, trains the same linear SVM as Part 1 on the
 same protocol splits, over:
 
   spatial      2x2 tiles vs. a single global vector (tiles summed)
@@ -13,9 +12,8 @@ together with feature dimension, storage, extraction and SVM times.
 
 Results are written to <out>/part2_grid.csv and <out>/part2_encodings.csv.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part2
-    python -m runs.run_part2 --encodings vlad_K32_C80 fv_K32_C80 --categories motorbike
 """
 
 import argparse

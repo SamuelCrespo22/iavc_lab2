@@ -83,6 +83,10 @@ def drawsFor(num_pos, seeds):
     return seeds if num_pos else seeds[:1]
 
 
+def regimeName(num_pos):
+    return f"{num_pos} positives" if num_pos else "all positives"
+
+
 def runFewShot(data, fm, num_pos_list, seeds, C):
     rows = []
     for category, subsets in data.items():
@@ -137,10 +141,6 @@ def runCSweep(data, fm, Cs, regimes, seeds):
                                  "ap_val": average_precision_score(y_val, score(fm(x_val)))})
         print(f"Stage D: {category} done")
     return pd.DataFrame(rows)
-
-
-def regimeName(num_pos):
-    return f"{num_pos} positives" if num_pos else "all positives"
 
 
 def testSelectedC(data, fm, sweep, regimes, seeds):

@@ -1,159 +1,173 @@
 # Part 1 — Handcrafted features: BoVW and linear SVM
 
-Linear SVM (C fixed) per category, positives vs. background, on the protocol splits. Values are test AP; mAP is the mean over categories.
+## Stage A — data, vocabulary size and spatial tiling
 
-## Stages A, E, F — vocabulary size, spatial tiling and feature map
+> Inspect the images; learn the vocabulary on training data only; compare one global histogram with spatial tiles; evaluate at least two vocabulary sizes besides the supplied K = 512.
 
-Test mAP. Rows: vocabulary size K and spatial layout (`2x2 tiles`: 4 concatenated histograms, dimension 4K; `global`: one histogram, dimension K). Columns: feature map (normalization); `sqrt_l2` is the Hellinger map.
+Images per class and subset:
 
-|    K | spatial   |    l1 |    l2 |   none |   sqrt |   sqrt_l1 |   sqrt_l2 |
-|-----:|:----------|------:|------:|-------:|-------:|----------:|----------:|
-|  256 | 2x2 tiles | 0.546 | 0.572 |  0.502 |  0.574 |     0.557 |     0.679 |
-|  256 | global    | 0.536 | 0.562 |  0.498 |  0.526 |     0.536 |     0.640 |
-|  512 | 2x2 tiles | 0.550 | 0.593 |  0.565 |  0.631 |     0.568 |     0.694 |
-|  512 | global    | 0.551 | 0.585 |  0.512 |  0.569 |     0.558 |     0.669 |
-| 1024 | 2x2 tiles | 0.538 | 0.586 |  0.564 |  0.677 |     0.553 |     0.712 |
-| 1024 | global    | 0.542 | 0.582 |  0.560 |  0.596 |     0.562 |     0.687 |
+| class      |   train |   val |   test |
+|:-----------|--------:|------:|-------:|
+| motorbike  |      96 |    24 |    125 |
+| aeroplane  |      90 |    22 |    126 |
+| person     |     821 |   204 |    983 |
+| horse      |     111 |    28 |    148 |
+| car        |     298 |    78 |    337 |
+| background |     815 |   204 |   1077 |
 
-## Stages D, E — per-category test AP (K = 512)
+![part1_samples](part1_samples.png)
 
-| spatial   | feature_map   |   aeroplane |   car |   horse |   motorbike |   person |   mAP |
-|:----------|:--------------|------------:|------:|--------:|------------:|---------:|------:|
-| 2x2 tiles | l1            |       0.606 | 0.647 |   0.558 |       0.359 |    0.581 | 0.550 |
-| 2x2 tiles | l2            |       0.521 | 0.676 |   0.560 |       0.513 |    0.695 | 0.593 |
-| 2x2 tiles | none          |       0.669 | 0.660 |   0.473 |       0.413 |    0.611 | 0.565 |
-| 2x2 tiles | sqrt          |       0.643 | 0.699 |   0.596 |       0.552 |    0.664 | 0.631 |
-| 2x2 tiles | sqrt_l1       |       0.559 | 0.655 |   0.577 |       0.444 |    0.607 | 0.568 |
-| 2x2 tiles | sqrt_l2       |       0.691 | 0.734 |   0.662 |       0.632 |    0.750 | 0.694 |
-| global    | l1            |       0.640 | 0.616 |   0.501 |       0.378 |    0.622 | 0.551 |
-| global    | l2            |       0.510 | 0.683 |   0.574 |       0.460 |    0.700 | 0.585 |
-| global    | none          |       0.527 | 0.586 |   0.418 |       0.424 |    0.608 | 0.512 |
-| global    | sqrt          |       0.551 | 0.683 |   0.495 |       0.466 |    0.647 | 0.569 |
-| global    | sqrt_l1       |       0.594 | 0.652 |   0.503 |       0.439 |    0.602 | 0.558 |
-| global    | sqrt_l2       |       0.682 | 0.745 |   0.645 |       0.523 |    0.752 | 0.669 |
+Per vocabulary size, Hellinger map. `qerr`: mean squared distance of a SIFT descriptor to its nearest word / total SIFT variance (`runs.quantization`, 100 images per subset). Codebook fit and SIFT + encoding time per image (5 images, CPU) measured by `run_part3`. Storage: tiled histogram as stored (int64). SVM training and inference (per test image): mean over categories.
 
-## Stage E — effect of spatial tiling per category (K = 512, Hellinger)
+|    K |   dim (tiles) |   val mAP (tiles) |   val mAP (global) |   qerr (train) |   qerr (test) |   codebook_fit_s |   extract_ms |   kb_per_image |   svm_train_s |   infer_us |
+|-----:|--------------:|------------------:|-------------------:|---------------:|--------------:|-----------------:|-------------:|---------------:|--------------:|-----------:|
+|  256 |          1024 |             0.705 |              0.640 |          0.476 |         0.484 |           31.093 |      180.323 |          8.000 |         0.071 |      9.933 |
+|  512 |          2048 |             0.717 |              0.668 |          0.445 |         0.453 |           63.996 |      221.215 |         16.000 |         0.146 |     19.836 |
+| 1024 |          4096 |             0.712 |              0.699 |          0.418 |         0.427 |           87.136 |      304.102 |         32.000 |         0.291 |     38.752 |
 
-| category   |   2x2 tiles |   global |   tiles - global |
-|:-----------|------------:|---------:|-----------------:|
-| aeroplane  |       0.691 |    0.682 |            0.008 |
-| car        |       0.734 |    0.745 |           -0.011 |
-| horse      |       0.662 |    0.645 |            0.017 |
-| motorbike  |       0.632 |    0.523 |            0.109 |
-| person     |       0.750 |    0.752 |           -0.001 |
+## Stage B — motorbike classifier
 
-## Stages B, C, D — setting selected on validation AP, per category
+> Motorbike images as positives, background as negatives, linear SVM on BoVW; rank the training images by score; visualize the visual words associated with high classifier weights.
 
-A large train–test gap indicates overfitting.
+Motorbike AP on the training images and on held-out images (K = 512, 2x2 tiles), per feature map:
 
-| category   |    K | spatial   | feature_map   |   dim |   ap_train |   ap_val |   ap_test |   train - test |
-|:-----------|-----:|:----------|:--------------|------:|-----------:|---------:|----------:|---------------:|
-| aeroplane  |  512 | 2x2 tiles | sqrt_l2       |  2048 |      0.991 |    0.765 |     0.691 |          0.300 |
-| car        | 1024 | 2x2 tiles | sqrt_l2       |  4096 |      1.000 |    0.775 |     0.748 |          0.252 |
-| horse      | 1024 | global    | sqrt_l2       |  1024 |      0.964 |    0.660 |     0.677 |          0.287 |
-| motorbike  |  256 | 2x2 tiles | sqrt_l2       |  1024 |      0.950 |    0.679 |     0.569 |          0.381 |
-| person     |  512 | 2x2 tiles | sqrt_l2       |  2048 |      0.967 |    0.820 |     0.750 |          0.216 |
+| feature_map   |   ap_train |   ap_val |   ap_test |
+|:--------------|-----------:|---------:|----------:|
+| none          |      1.000 |    0.568 |     0.413 |
+| l1            |      0.804 |    0.533 |     0.359 |
+| l2            |      0.948 |    0.646 |     0.513 |
+| sqrt          |      1.000 |    0.668 |     0.552 |
+| sqrt_l1       |      0.645 |    0.558 |     0.444 |
+| sqrt_l2       |      1.000 |    0.660 |     0.632 |
 
-mAP (test) of the selected settings: **0.687**
+![part1_ranked_train](part1_ranked_train.png)
 
-## Stage G — training set size
+Visual words with the largest contribution to the score (SVM weight, averaged over the tiles, × Hellinger histogram), for the top-ranked test image and the highest-ranked background test image. Each mosaic shows patches assigned to one word; dots of the same colour mark them in the image.
 
-Validation AP, mean ± std over seeds (stratified subsets). `l2` = linear kernel, `sqrt_l2` = Hellinger.
+![part1_words](part1_words.png)
+
+## Stage C — test set: ranking, precision–recall curve and AP
+
+> Apply the motorbike classifier to the test set, rank the images by the SVM score, plot the precision–recall curve and report AP.
+
+Motorbike test AP = **0.632**; 28 of the 36 top-ranked test images are motorbikes (test set: 125 motorbikes, 1077 background images).
+
+Classification at the SVM's own threshold (score > 0): precision = 0.701, recall = 0.488 (87 images predicted positive). Confusion matrix on test:
+
+| true \ predicted   |   motorbike |   background |
+|:-------------------|------------:|-------------:|
+| motorbike          |          61 |           64 |
+| background         |          26 |         1051 |
+
+AP and the precision–recall curve depend only on the order of the scores; the bias b only sets where the score > 0 threshold falls on that curve.
+
+![part1_ranked_test](part1_ranked_test.png)
+
+Precision–recall curves on the training images (dashed) and on the test set (solid):
+
+![part1_pr_curves](part1_pr_curves.png)
+
+## Stage D — other categories
+
+> The same experiment for aeroplane, person, horse and car, same splits and protocol; per-class AP.
+
+K = 512, 2x2 tiles, `sqrt_l2`. Test mAP = **0.694**. `normalized AP` = (AP − random AP) / (1 − random AP): raw AP is not comparable across classes with different shares of positives.
+
+| category   |   train positives |   test positives |   random AP |   ap_train |   ap_val |   ap_test |   normalized AP |   test_top36_pos |   precision (s>0) |   recall (s>0) |   TP |   FP |   FN |   TN |
+|:-----------|------------------:|-----------------:|------------:|-----------:|---------:|----------:|----------------:|-----------------:|------------------:|---------------:|-----:|-----:|-----:|-----:|
+| motorbike  |                96 |              125 |       0.104 |      1.000 |    0.660 |     0.632 |           0.589 |               28 |             0.701 |          0.488 |   61 |   26 |   64 | 1051 |
+| aeroplane  |                90 |              126 |       0.105 |      0.991 |    0.765 |     0.691 |           0.654 |               32 |             0.768 |          0.500 |   63 |   19 |   63 | 1058 |
+| person     |               821 |              983 |       0.477 |      0.967 |    0.820 |     0.750 |           0.523 |               33 |             0.677 |          0.690 |  678 |  323 |  305 |  754 |
+| horse      |               111 |              148 |       0.121 |      1.000 |    0.596 |     0.662 |           0.615 |               33 |             0.695 |          0.554 |   82 |   36 |   66 | 1041 |
+| car        |               298 |              337 |       0.238 |      0.994 |    0.741 |     0.734 |           0.651 |               30 |             0.677 |          0.665 |  224 |  107 |  113 |  970 |
+
+Test images of each class (rows) also labelled with another class (columns). The negatives of every task are background images only, so images of the other classes are never scored:
+
+| class     | motorbike   | aeroplane   | person   | horse   | car   | background   |
+|:----------|:------------|:------------|:---------|:--------|:------|:-------------|
+| motorbike | ·           | –           | 85       | –       | 17    | –            |
+| aeroplane | –           | ·           | 12       | –       | 2     | –            |
+| person    | 85          | 12          | ·        | 116     | 103   | –            |
+| horse     | –           | –           | 116      | ·       | 4     | –            |
+| car       | 17          | 2           | 103      | 4       | ·     | –            |
+
+## Stage E — normalization and spatial information
+
+> No normalization vs. L1 vs. L2, selected on validation; 2x2 tiles vs. one global histogram.
+
+Validation mAP:
+
+|    K | spatial   |   none |    l1 |    l2 |
+|-----:|:----------|-------:|------:|------:|
+|  256 | 2x2 tiles |  0.557 | 0.559 | 0.621 |
+|  256 | global    |  0.568 | 0.565 | 0.556 |
+|  512 | 2x2 tiles |  0.607 | 0.570 | 0.628 |
+|  512 | global    |  0.573 | 0.576 | 0.575 |
+| 1024 | 2x2 tiles |  0.592 | 0.558 | 0.604 |
+| 1024 | global    |  0.552 | 0.555 | 0.562 |
+
+Effect of the tiles per category (K = 512, `sqrt_l2`):
+
+| category   |   test: 2x2 tiles |   test: global |   test: tiles − global |   val: tiles − global |
+|:-----------|------------------:|---------------:|-----------------------:|----------------------:|
+| motorbike  |             0.632 |          0.523 |                  0.109 |                 0.137 |
+| aeroplane  |             0.691 |          0.682 |                  0.008 |                 0.085 |
+| person     |             0.750 |          0.752 |                 -0.001 |                 0.021 |
+| horse      |             0.662 |          0.645 |                  0.017 |                -0.010 |
+| car        |             0.734 |          0.745 |                 -0.011 |                 0.009 |
+
+## Stage F — Hellinger feature map
+
+> Square root of the histogram + normalization (Hellinger kernel as an explicit feature map), compared with the other normalizations; motorbike retrained and evaluated on test.
+
+Validation mAP (`l2` = linear kernel, for reference):
+
+|    K | spatial   |    l2 |   sqrt |   sqrt_l1 |   sqrt_l2 |
+|-----:|:----------|------:|-------:|----------:|----------:|
+|  256 | 2x2 tiles | 0.621 |  0.630 |     0.608 |     0.705 |
+|  256 | global    | 0.556 |  0.553 |     0.561 |     0.640 |
+|  512 | 2x2 tiles | 0.628 |  0.680 |     0.597 |     0.717 |
+|  512 | global    | 0.575 |  0.622 |     0.563 |     0.668 |
+| 1024 | 2x2 tiles | 0.604 |  0.705 |     0.577 |     0.712 |
+| 1024 | global    | 0.562 |  0.604 |     0.574 |     0.699 |
+
+Test AP, linear (`l2`) vs. Hellinger (`sqrt_l2`), K = 512, 2x2 tiles:
+
+| feature_map   |   motorbike |   aeroplane |   person |   horse |   car |   mAP |
+|:--------------|------------:|------------:|---------:|--------:|------:|------:|
+| l2            |       0.513 |       0.521 |    0.695 |   0.560 | 0.676 | 0.593 |
+| sqrt_l2       |       0.632 |       0.691 |    0.750 |   0.662 | 0.734 | 0.694 |
+
+## Stage G — number of training images
+
+> Train with 10, 25, 50 and 100 % of the training data, several seeds; validation AP against the number of training examples; linear vs. Hellinger.
+
+Validation AP, mean ± std over 5 seeds (stratified subsets; at 100 % every seed uses the same images). `l2` = linear kernel, `sqrt_l2` = Hellinger; K = 512, 2x2 tiles.
 
 | category   | feature_map   | 0.1           | 0.25          | 0.5           | 1.0           |
 |:-----------|:--------------|:--------------|:--------------|:--------------|:--------------|
-| aeroplane  | l2            | 0.386 ± 0.079 | 0.453 ± 0.093 | 0.449 ± 0.053 | 0.556 ± 0.006 |
-| aeroplane  | sqrt_l2       | 0.627 ± 0.058 | 0.669 ± 0.057 | 0.707 ± 0.067 | 0.779 ± 0.001 |
-| car        | l2            | 0.531 ± 0.026 | 0.579 ± 0.043 | 0.648 ± 0.012 | 0.664 ± 0.002 |
-| car        | sqrt_l2       | 0.573 ± 0.034 | 0.645 ± 0.049 | 0.745 ± 0.022 | 0.768 ± 0.001 |
-| horse      | l2            | 0.349 ± 0.048 | 0.436 ± 0.042 | 0.476 ± 0.039 | 0.500 ± 0.002 |
-| horse      | sqrt_l2       | 0.400 ± 0.037 | 0.468 ± 0.051 | 0.560 ± 0.044 | 0.618 ± 0.003 |
-| motorbike  | l2            | 0.202 ± 0.048 | 0.468 ± 0.112 | 0.451 ± 0.063 | 0.586 ± 0.004 |
-| motorbike  | sqrt_l2       | 0.236 ± 0.066 | 0.562 ± 0.151 | 0.584 ± 0.063 | 0.627 ± 0.000 |
-| person     | l2            | 0.613 ± 0.030 | 0.631 ± 0.019 | 0.688 ± 0.015 | 0.733 ± 0.000 |
-| person     | sqrt_l2       | 0.688 ± 0.045 | 0.702 ± 0.034 | 0.770 ± 0.015 | 0.800 ± 0.001 |
+| motorbike  | l2            | 0.278 ± 0.088 | 0.378 ± 0.079 | 0.435 ± 0.049 | 0.643 ± 0.001 |
+| motorbike  | sqrt_l2       | 0.296 ± 0.119 | 0.490 ± 0.115 | 0.522 ± 0.036 | 0.660 ± 0.000 |
+| aeroplane  | l2            | 0.287 ± 0.039 | 0.378 ± 0.096 | 0.425 ± 0.086 | 0.554 ± 0.002 |
+| aeroplane  | sqrt_l2       | 0.613 ± 0.114 | 0.651 ± 0.057 | 0.700 ± 0.057 | 0.764 ± 0.001 |
+| person     | l2            | 0.620 ± 0.026 | 0.665 ± 0.020 | 0.694 ± 0.021 | 0.749 ± 0.000 |
+| person     | sqrt_l2       | 0.704 ± 0.010 | 0.749 ± 0.008 | 0.775 ± 0.016 | 0.819 ± 0.000 |
+| horse      | l2            | 0.401 ± 0.061 | 0.476 ± 0.043 | 0.485 ± 0.017 | 0.504 ± 0.001 |
+| horse      | sqrt_l2       | 0.455 ± 0.084 | 0.481 ± 0.028 | 0.556 ± 0.030 | 0.597 ± 0.001 |
+| car        | l2            | 0.554 ± 0.033 | 0.589 ± 0.026 | 0.623 ± 0.015 | 0.682 ± 0.000 |
+| car        | sqrt_l2       | 0.590 ± 0.030 | 0.654 ± 0.047 | 0.696 ± 0.016 | 0.742 ± 0.001 |
+| mAP        | l2            | 0.428 ± 0.025 | 0.497 ± 0.031 | 0.532 ± 0.018 | 0.626 ± 0.001 |
+| mAP        | sqrt_l2       | 0.532 ± 0.027 | 0.605 ± 0.032 | 0.650 ± 0.011 | 0.716 ± 0.000 |
 
-Mean training set size per fraction (positives in `num_pos`):
+Positive training images per fraction (the negatives are subsampled in the same proportion):
 
-|   fraction |   num_train |   num_pos |
-|-----------:|------------:|----------:|
-|      0.100 |     111.000 |    29.000 |
-|      0.250 |     275.000 |    71.000 |
-|      0.500 |     550.000 |   142.000 |
-|      1.000 |    1098.000 |   283.000 |
+| category   |   0.1 |   0.25 |   0.5 |   1.0 |
+|:-----------|------:|-------:|------:|------:|
+| motorbike  |    10 |     24 |    48 |    96 |
+| aeroplane  |     9 |     23 |    45 |    90 |
+| person     |    83 |    206 |   411 |   821 |
+| horse      |    12 |     28 |    56 |   111 |
+| car        |    30 |     75 |   149 |   298 |
 
-![part1_fractions_aeroplane](part1_fractions_aeroplane.png)
-
-![part1_fractions_car](part1_fractions_car.png)
-
-![part1_fractions_horse](part1_fractions_horse.png)
-
-![part1_fractions_motorbike](part1_fractions_motorbike.png)
-
-![part1_fractions_person](part1_fractions_person.png)
-
-## Stages B, C — visual inspection
-
-Ranked image lists, precision–recall curves and relevant visual words are in `1_handcraft.ipynb`.
-
-## Questions
-
-**Stage A**
-
-- How do you choose the number of visual words for BoVW?
-  - *Answer:*
-- How does spatial tiling encode useful layout information? When might it reduce generalization?
-  - *Answer:*
-- How does vocabulary size affect representation capacity, quantization error, computation and storage?
-  - *Answer:*
-
-**Stage B**
-
-- What do you anticipate the results to be? What do you predict will occur?
-  - *Answer:*
-- Do the highest-ranked images share object features, contextual cues or background patterns?
-  - *Answer:*
-- Why can a classifier achieve high training performance but fail on new images?
-  - *Answer:*
-
-**Stage C**
-
-- Why is the bias term irrelevant to the ordering of images scored by one fixed binary linear classifier?
-  - *Answer:*
-- How does the ordering of positive and negative examples affect the precision-recall curve and AP?
-  - *Answer:*
-
-**Stage D**
-
-- How do intra-class variation, sample count, object scale and background diversity help explain differences in AP?
-  - *Answer:*
-
-**Stage E**
-
-- How does L2 normalization affect the self-similarity of a nonzero feature vector under a linear kernel?
-  - *Answer:*
-- Regarding the L2 normalized BoVW histogram h, what can be inferred about its self-similarity K(h,h)?
-  - *Answer:*
-- How does K(h,h) of an L2 normalized histogram compare to K(h,h') of two distinct L2 normalized histograms?
-  - *Answer:*
-- Would the same hold true for unnormalized or L1 normalized histograms?
-  - *Answer:*
-- Is there a correlation between classification performance and the use of L2 normalization?
-  - *Answer:*
-- Why can removing spatial information help some classes but hurt others?
-  - *Answer:*
-
-**Stage F**
-
-- How should the BoVW histograms be normalized for the Hellinger kernel classifier? Before or after the square root?
-  - *Answer:*
-- Why does the square-root mapping change the relative contribution of frequent and rare visual words?
-  - *Answer:*
-
-**Stage G**
-
-- What performance do you get with the linear kernel? And with the Hellinger kernel?
-  - *Answer:*
-- Does performance saturate? Would collecting more examples or improving their diversity likely help more?
-  - *Answer:*
+![part1_fractions](part1_fractions.png)
 

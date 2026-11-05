@@ -5,8 +5,9 @@ Evaluates the encodings written by `python -m src.extract_deep -m dinov2_vits14`
   dinov2_vits14_cls        global image embedding (CLS token, 384-d)
   dinov2_vits14_patchmean  mean of the patch tokens (384-d; optional extension)
 
-plus ResNet-18 layer4 for comparison when available. For each encoding and
-feature map (none / L2; DINOv2 features are signed, so no square root), trains
+plus, for comparison when available, ResNet-18 layer4, the torchvision ViT-B/32
+class token and the CLIP image embedding. For each encoding and feature map
+(none / L2; DINOv2 and ViT features are signed, so no square root), trains
 the Part 1 linear SVM per category and reports per-class AP and mAP; the
 feature map is selected on mean validation AP.
 
@@ -21,7 +22,7 @@ Results: <out>/part4_dino_grid.csv, <out>/part4_dino_encodings.csv,
 
 Usage (from the directory containing README.md):
     python -m runs.run_part4_dino
-    python -m runs.run_part4_dino --compare resnet18_layer4 clip_vit_b_32
+    python -m runs.run_part4_dino --compare resnet18_layer4
 """
 
 import argparse
@@ -36,7 +37,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 
 from runs.run_part1 import CATEGORIES, l2, loadData, trainAndEvaluate
 from runs.run_part2 import ENCODINGS_DIR
-from runs.run_part4_resnet import deepEncodingInfo
+from runs.run_part4_resnet import deepEncodingInfo, summarize
 
 PROTOCOL_DIR = Path("data/splits_protocol")
 DINO_ENCODINGS = ["dinov2_vits14_cls", "dinov2_vits14_patchmean"]
@@ -136,32 +137,10 @@ def confusionMatrix(encoding, fm, models, categories, out_dir):
           f"{accuracy_score(true[objects], best[objects]):.3f}")
 
 
-def summarize(grid, info):
-    pd.set_option("display.width", 200)
-    pd.set_option("display.max_columns", 30)
-
-    print("\n=== Test AP per encoding / feature map ===")
-    table = grid.pivot_table(index=["encoding", "feature_map"], columns="category",
-                             values="ap_test", sort=False)
-    table["mAP"] = table.mean(axis=1)
-    print(table.round(3).to_string())
-
-    mean_val = grid.groupby(["encoding", "feature_map"], sort=False)["ap_val"].mean()
-    best = mean_val.groupby(level="encoding", sort=False).idxmax().tolist()
-    costs = (grid.set_index(["encoding", "feature_map"]).loc[best]
-             .groupby(level="encoding", sort=False)[["train_time_s", "infer_ms_per_image"]].mean())
-    summary = info.set_index("encoding").join(costs)
-    summary.insert(0, "feature_map", dict(best))
-    summary["mAP"] = table.loc[best].droplevel("feature_map")["mAP"]
-    print("\n=== Selected feature map per encoding (on mean val AP) ===")
-    print(summary.round(3).to_string())
-    return best
-
-
 def parseArgs():
     parser = argparse.ArgumentParser(description="Part 4 Stage B: frozen DINOv2 features + linear SVM.")
     parser.add_argument("--categories", nargs="+", default=CATEGORIES)
-    parser.add_argument("--compare", nargs="*", default=["resnet18_layer4"],
+    parser.add_argument("--compare", nargs="*", default=["resnet18_layer4", "vit_b_32", "clip_vit_b_32"],
                         help="Other src.extract_deep encodings to evaluate alongside DINOv2")
     parser.add_argument("--C", type=float, default=10.0, help="SVM C (fixed, as in Part 1)")
     parser.add_argument("--out", default="results")
