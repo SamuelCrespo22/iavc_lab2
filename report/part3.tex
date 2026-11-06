@@ -1,26 +1,26 @@
-% ---------------------------------------------------------------------------
-% Parte 3 — requer no preâmbulo: \usepackage{booktabs,graphicx}
-% Figura: copiar code/results/part3_map_vs_dim.png para figures/
-% ---------------------------------------------------------------------------
-\section{Vocabulários grandes com PCA vs.\ vocabulários pequenos}
+\section{Large visual vocabularies with PCA vs smaller vocabularies}
 \label{sec:part3}
 
 \paragraph{Protocolo.}
 Avaliámos BoVW com $K \in \{32,\dots,1024\}$ e VLAD/FV com $K \in \{16,32,64\}$,
 sem PCA e com PCA para $d \in \{32,\dots,512\}$ ($d < $ dimensão original e
 $d \le N_{\text{treino}}-1$). Para que só $K$ e $d$ variem, fixámos uma
-normalização por encoding: BoVW global com Hellinger; VLAD e FV com tiles
-$2\times2$ e SSR + L2. Não reutilizámos a escolha da Parte~2, que dava
-normalizações diferentes à VLAD consoante $K$. O PCA é ajustado só nas
-features de treino (reajustado em cada uma das 3 seeds), e a sua saída é
-L2-normalizada. Reportamos o mAP de test de todas as condições (média
-$\pm$ desvio).
+normalização por encoding: BoVW global com mapa de Hellinger; VLAD e FV com
+tiles $2\times2$, \emph{signed square root} + L2. Não reutilizámos a escolha
+da Parte~2, que dava normalizações diferentes à VLAD consoante $K$. Os
+codebooks e o PCA são ajustados só com dados de treino, e a saída do PCA é
+L2-normalizada. O classificador é o SVM linear da Parte~1 ($C=10$). Cada
+condição corre com 3 seeds (90\,\% estratificado do treino, PCA reajustado), e
+reportamos o mAP de test (média $\pm$ desvio). Nada é selecionado nesta parte,
+por isso todas as condições são reportadas no test, como pede o enunciado. Os
+tempos foram medidos em CPU (extração em 5 imagens, indicativa), e a memória
+conta $d \times 4$\,B (float32) para todas as representações.
 
-\begin{table*}[t]
+\begin{table*}[h]
 \centering
 \caption{Condições A--D (BoVW) e o equivalente para VLAD/FV com $K=64$.
 Extração = SIFT + encoding por imagem. Inferência = projeção PCA + SVM por
-imagem. O ajuste do PCA demora 0.09\,s (BoVW), 0.84\,s (VLAD) e 1.69\,s (FV).
+imagem. O ajuste do PCA demora 0.32\,s (BoVW), 1.12\,s (VLAD) e 1.75\,s (FV).
 Accuracy (threshold 0) entre 0.83 e 0.89 em todas as linhas.}
 \label{tab:part3}
 \small
@@ -30,22 +30,22 @@ Accuracy (threshold 0) entre 0.83 e 0.89 em todas as linhas.}
 \toprule
  & Representação & $d$ & Removido & mAP & F1$_\text{macro}$ & Codebook (s) & Extração (ms) & Treino SVM (s) & Inferência ($\mu$s) & KB/img \\
 \midrule
-A & BoVW $K{=}256$            &   256 & --      & $0.631 \pm .004$ & 0.699 & 31.1 & 180 & 0.018 & 0.06 & 1.0 \\
-B & BoVW $K{=}1024$           &  1024 & --      & $0.682 \pm .003$ & 0.755 & 87.1 & 304 & 0.073 & 0.18 & 4.0 \\
-C & BoVW $K{=}1024$ + PCA     &   128 & 87.5\,\% & $0.654 \pm .002$ & 0.747 & 87.1 & 304 & 0.009 & 2.47 & 0.5 \\
-C & BoVW $K{=}1024$ + PCA     &    32 & 96.9\,\% & $0.633 \pm .004$ & 0.714 & 87.1 & 304 & 0.003 & 1.23 & 0.125 \\
-D & BoVW $K{=}128$            &   128 & --      & $0.590 \pm .004$ & 0.644 & 19.1 & 159 & 0.010 & 0.03 & 0.5 \\
-D & BoVW $K{=}32$             &    32 & --      & $0.502 \pm .001$ & 0.601 & 28.2 & 157 & 0.004 & 0.01 & 0.125 \\
+A & BoVW $K{=}256$            &   256 & --      & $0.632 \pm .002$ & 0.704 & 31.1 & 186 & 0.018 & 0.14 & 1.0 \\
+B & BoVW $K{=}1024$           &  1024 & --      & $0.681 \pm .004$ & 0.754 & 87.1 & 282 & 0.080 & 0.42 & 4.0 \\
+C & BoVW $K{=}1024$ + PCA     &   128 & 87.5\,\% & $0.652 \pm .003$ & 0.742 & 87.1 & 282 & 0.011 & 4.30 & 0.5 \\
+C & BoVW $K{=}1024$ + PCA     &    32 & 96.9\,\% & $0.636 \pm .001$ & 0.734 & 87.1 & 282 & 0.004 & 2.03 & 0.125 \\
+D & BoVW $K{=}128$            &   128 & --      & $0.593 \pm .005$ & 0.647 & 19.1 & 171 & 0.009 & 0.07 & 0.5 \\
+D & BoVW $K{=}32$             &    32 & --      & $0.494 \pm .009$ & 0.602 &  7.0 & 159 & 0.004 & 0.02 & 0.125 \\
 \midrule
-B & VLAD $K{=}64$             & 20480 & --      & $0.765 \pm .004$ & 0.773 &  8.1 & 166 & 1.369 & 3.32 & 80 \\
-C & VLAD $K{=}64$ + PCA       &   128 & 99.4\,\% & $0.730 \pm .002$ & 0.780 &  8.1 & 166 & 0.010 & 40.4 & 0.5 \\
-B & FV $K{=}64$               & 41216 & --      & $0.797 \pm .003$ & 0.785 & 55.7 & 234 & 3.074 & 9.59 & 161 \\
-C & FV $K{=}64$ + PCA         &   128 & 99.7\,\% & $0.756 \pm .008$ & 0.791 & 55.7 & 234 & 0.010 & 84.6 & 0.5 \\
+B & VLAD $K{=}64$             & 20480 & --      & $0.766 \pm .004$ & 0.775 &  8.1 & 207 & 1.245 & 6.55 & 80 \\
+C & VLAD $K{=}64$ + PCA       &   128 & 99.4\,\% & $0.732 \pm .003$ & 0.781 &  8.1 & 207 & 0.008 & 41.8 & 0.5 \\
+B & FV $K{=}64$               & 41216 & --      & $0.798 \pm .002$ & 0.789 & 55.7 & 325 & 2.777 & 12.5 & 161 \\
+C & FV $K{=}64$ + PCA         &   128 & 99.7\,\% & $0.750 \pm .005$ & 0.793 & 55.7 & 325 & 0.008 & 74.5 & 0.5 \\
 \bottomrule
 \end{tabular}}
 \end{table*}
 
-\begin{figure*}[t]
+\begin{figure*}[h]
 \centering
 \includegraphics[width=\linewidth]{figures/part3_map_vs_dim.png}
 \caption{mAP de test em função da dimensão final (3 seeds, média $\pm$ desvio).
@@ -55,67 +55,69 @@ sem PCA. No BoVW, a linha tracejada é a condição D ($K=d$, sem PCA).}
 \end{figure*}
 
 \paragraph{Um codebook maior ajuda antes do PCA?}
-Sim, mas os ganhos diminuem. O mAP do BoVW passa de 0.502 ($K=32$) para 0.631
-($K=256$) e 0.682 ($K=1024$), e a última duplicação já só acrescenta $+0.016$.
+Sim, mas os ganhos diminuem. O mAP do BoVW passa de 0.494 ($K=32$) para 0.632
+($K=256$) e 0.681 ($K=1024$), e a última duplicação já só acrescenta $+0.014$.
 O erro de quantização relativo desce de 0.52 para 0.43 ($K=128\to1024$) e é
 quase igual em treino e test, por isso o vocabulário maior descreve melhor os
 patches sem sobreajustar. O ganho de $K=256$ para 1024 é desigual entre
-classes: motorbike $+0.116$ e horse $+0.079$, mas aeroplane só $+0.007$. As
+classes: motorbike $+0.103$ e horse $+0.084$, mas aeroplane só $+0.007$. As
 duas primeiras são definidas por estruturas locais finas (rodas e quadro;
 pernas e crina), que um vocabulário grosseiro funde com patches de outros
 objetos. O aeroplane, com tantos positivos como o motorbike, é plausivelmente
 reconhecido pelo contexto (céu, pista), que poucas palavras já captam. VLAD
-(0.705$\to$0.765) e FV (0.766$\to$0.797) seguem a mesma tendência
+(0.709$\to$0.766) e FV (0.773$\to$0.798) seguem a mesma tendência
 \cite{chatfield2011}.
 
 \paragraph{O PCA retém o ganho?}
 Em grande parte, e a perda é gradual (Fig.~\ref{fig:part3}). O BoVW $K=1024$
-reduzido a $d=512/256/128$ dá 0.669/0.660/0.654 e retém 75/57/45\,\% da
+reduzido a $d=512/256/128$ dá 0.663/0.659/0.652 e retém 64/56/41\,\% da
 vantagem sobre $K=256$. Com $d=32$ (97\,\% removido) ainda empata com
-$K=256$ completo. Aceitando $-0.02$ de mAP, o PCA remove $\sim$50\,\% das
-dimensões no BoVW, 95\,\% na VLAD e 98.8\,\% no FV ($K=64$: 41\,216$\to$512,
-0.797$\to$0.783). O PCA nunca melhorou o mesmo codebook para lá do ruído entre
-seeds: comprime, mas não regulariza, porque guarda as direções de maior
+$K=256$ completo (0.636 vs.\ 0.632). Aceitando $-0.02$ de mAP, o PCA remove
+50\,\% das dimensões no BoVW e, com $K=64$, 97.5\,\% na VLAD
+(20\,480$\to$512, 0.766$\to$0.749) e 98.8\,\% no FV (41\,216$\to$512,
+0.798$\to$0.785). O PCA nunca melhorou o mesmo codebook: comprime, mas não
+regulariza, porque guarda as direções de maior
 variância e não as mais discriminativas. Os ganhos reportados exigem whitening
 \cite{jegou2012negative}, que não aplicámos. Há uma exceção por explicar: na
-VLAD $K=32/64$ o mAP desce em $d=256$ e recupera em $d=512$ ($K=64$:
-0.730$\to$0.715$\to$0.742). Não se deve à convergência do SVM nem à
-normalização L2 depois do PCA.
+VLAD $K=64$ o mAP desce em $d=256$ e recupera em $d=512$
+(0.732$\to$0.715$\to$0.749). Não se deve à convergência do SVM (repete-se com
+5000 iterações) nem à normalização L2 depois do PCA.
 
 \paragraph{À mesma dimensão, grande + PCA supera pequeno?}
-Sim, para todo o $d$, e a vantagem cresce com a compressão. C$-$D vale
-$+0.131$ em $d=32$, $+0.064$ em $d=128$ e $+0.003$ em $d=512$, este último
-dentro do desvio. Na Fig.~\ref{fig:part3}, todas as curvas ficam acima da
-tracejada. Um k-means pequeno funde descritores só pela distância no espaço
+Sim, até $d=256$, e a vantagem cresce com a compressão. C$-$D vale
+$+0.142$ em $d=32$, $+0.059$ em $d=128$ e $+0.028$ em $d=256$. Em $d=512$
+empatam ($-0.003$, dentro do desvio): com só metade das dimensões removidas,
+o $K=512$ direto já chega. Na Fig.~\ref{fig:part3}, as curvas ficam acima da
+tracejada em todos os outros pontos. Um k-means pequeno funde descritores só pela distância no espaço
 SIFT. O PCA sobre um histograma grande funde as palavras que co-ocorrem nas
 imagens, uma compressão aprendida dos dados que perde menos por dimensão
 \cite{jegou2012aggregating}.
 
 \paragraph{Compromisso entre mAP, memória e tempo.}
 O PCA atua sobre os custos que já eram pequenos (Tab.~\ref{tab:part3}).
-\emph{Construção}: a extração domina (125\,ms de SIFT + até 180\,ms de encoding
+\emph{Construção}: a extração domina (130\,ms de SIFT + 29--195\,ms de encoding
 por imagem; codebook de 31\,s para 87\,s), e o PCA não a reduz, porque a
 representação completa tem de ser calculada primeiro. \emph{Memória e treino}:
 é aqui que o PCA ganha. O FV $K=64$ passa de 161 para 0.5\,KB por imagem
-($322\times$) e o treino do SVM de 3.1 para 0.01\,s, por $-0.041$ de mAP.
-\emph{Inferência}: fica mais lenta (FV: 9.6$\to$85\,$\mu$s), porque projetar
+($322\times$) e o treino do SVM de 2.8 para 0.01\,s, por $-0.048$ de mAP.
+\emph{Inferência}: fica mais lenta (FV: 12.5$\to$74\,$\mu$s), porque projetar
 custa $D\cdot d$ operações; só compensa com a projeção guardada, como num
 índice. À mesma memória, VLAD/FV com PCA dominam o BoVW: VLAD $K=64$ + PCA~128
-(0.5\,KB, 0.730) supera o BoVW $K=1024$ completo (4\,KB, 0.682). A accuracy
+(0.5\,KB, 0.732) supera o BoVW $K=1024$ completo (4\,KB, 0.681). A accuracy
 quase não varia (0.83--0.89, dominada pelo background); mAP e macro-F1
 distinguem as condições.
 
 \paragraph{BoVW vs.\ VLAD/FV.}
-A conclusão mantém-se (em $d=128$, de $K=16$ para 64: VLAD 0.682$\to$0.730,
-FV 0.720$\to$0.756), e a ordem FV $>$ VLAD $>$ BoVW vale para todo o $d$. O que
+A conclusão mantém-se (em $d=128$, de $K=16$ para 64: VLAD 0.678$\to$0.732,
+FV 0.727$\to$0.750), e a ordem FV $>$ VLAD $>$ BoVW vale para todo o $d$. O que
 muda é a escala. Para o mesmo $K$, VLAD e FV são 320--644$\times$ maiores do
 que o BoVW. A condição D não existe (a VLAD mais pequena já tem 5120
 dimensões), e o PCA é o único caminho para um descritor compacto. Comprimem-se
 também melhor: $d=128$ remove 99.4--99.7\,\% da VLAD/FV $K=64$, contra
-87.5\,\% do BoVW $K=1024$, retendo a mesma fração do mAP (94--97\,\%). As
+87.5\,\% do BoVW $K=1024$, retendo a mesma fração do mAP (94--96\,\%). As
 dimensões são muito correlacionadas (resíduos de SIFT-PCA80 repetidos em 4
-tiles). Além disso, com $\sim$900--1600 imagens de treino, o vetor de pesos do
+tiles). Além disso, com 815--1473 imagens de treino por seed, o vetor de pesos do
 SVM vive no espaço gerado por essas imagens (teorema do representante). Das
-41\,216 dimensões do FV, no máximo $\sim$1600 direções são utilizáveis: a
+41\,216 dimensões do FV, no máximo $\sim$1500 direções são utilizáveis: a
 dimensão nominal exagera a capacidade e não é comparável entre encodings
 \cite{perronnin2010,jegou2010}.

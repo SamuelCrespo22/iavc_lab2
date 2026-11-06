@@ -1,4 +1,4 @@
-Proposta de resposta para cada pergunta da Parte 4, com os números de onde vem, o raciocínio e a comparação com a literatura. Os números vêm de [report_part4.md](../code/results/report_part4.md), de `part4_ranking.csv` e de `part4_examples.csv`. As explicações estão em português; as respostas propostas estão em inglês, como o resto do relatório.
+Proposta de resposta para cada pergunta da Parte 4, com os números de onde vem, o raciocínio e a comparação com a literatura. Os números vêm de [report_part4.md](../code/results/report_part4.md), e de `part4_examples.csv`. As explicações estão em português; as respostas propostas estão em inglês, como o resto do relatório.
 
 Contagens úteis (split de teste, positivos contra 1077 imagens de background): aeroplane 126, motorbike 125, horse 148, car 337, person 983. Positivos de treino: 90 / 96 / 111 / 298 / 821.
 
@@ -10,13 +10,13 @@ Contagens úteis (split de teste, positivos contra 1077 imagens de background): 
 
 | representação | dim | test mAP | extração (ms/img) | inferência (µs/img) |
 |---|---|---|---|---|
-| BoVW K512 (Hellinger) | 2048 | 0.694 | 240 | 19 |
-| VLAD K32 | 10 240 | 0.746 | 207 | 227 |
-| FV K32 | 20 608 | 0.784 | 296 | 361 |
-| ResNet-18 layer2 | 128 | 0.781 | 18 | 0.7 |
-| ResNet-18 layer3 | 256 | 0.903 | 18 | 1.6 |
-| ResNet-18 layer4 | 512 | **0.964** | 18 | 3.1 |
-| DINOv2 patchmean (Stage B) | 384 | **0.984** | 52 | 2.2 |
+| BoVW K512 (Hellinger) | 2048 | 0.694 | 254 | 34 |
+| VLAD K32 | 10 240 | 0.746 | 224 | 336 |
+| FV K32 | 20 608 | 0.784 | 278 | 463 |
+| ResNet-18 layer2 | 128 | 0.781 | 18 | 0.8 |
+| ResNet-18 layer3 | 256 | 0.903 | 18 | 1.7 |
+| ResNet-18 layer4 | 512 | **0.964** | 18 | 4.3 |
+| DINOv2 patchmean (Stage B) | 384 | **0.984** | 52 | 3.2 |
 
 - O layer2 (128-d) já empata com o FV (20 608-d). O layer4 (512-d) ganha +0.18 mAP ao FV com 40× menos dimensões.
 - Dentro da ResNet, o AP sobe com a profundidade (0.781 → 0.903 → 0.964). A dimensão também sobe, mas o ganho vem da profundidade: o layer3 (256-d) bate o FV com 20 608-d.
@@ -39,7 +39,7 @@ Contagens úteis (split de teste, positivos contra 1077 imagens de background): 
 - As camadas mais profundas são mais semânticas e transferem melhor para categorias próximas das de pré-treino (Zeiler & Fergus, 2014; Yosinski et al., 2014).
 
 **Proposta de resposta:**
-> Handcrafted pipelines fix the local descriptor (SIFT gradient histograms of small patches), learn the codebook without labels and pool the codes in an orderless way. The only part learned from labels is the linear SVM. A pretrained CNN learns a non-linear hierarchy end-to-end from 1.28 M labeled ImageNet images, which include classes very close to ours (airliners, car types, mopeds, horses). Its last-layer units have receptive fields covering most of the image and respond to object parts and objects rather than to gradients. The result is a large gap: ResNet-18 layer4 reaches 0.964 test mAP against 0.784 for FV, 0.746 for VLAD and 0.694 for BoVW. The gap is largest on the classes BoVW found hardest (motorbike 0.632 → 0.974, horse 0.662 → 0.954). Extraction is also cheaper on our CPU (18 ms vs. 210–300 ms per image), as is inference (3 µs vs. up to 360 µs). A higher dimension does not imply a better AP. The 512-d layer4 beats the 20 608-d FV by 0.18, layer2 with 128 dimensions already matches FV, and the best model, DINOv2 (Stage B), has the smallest feature (384-d, 0.984). Within ResNet, AP grows from layer2 to layer4 (0.781 → 0.903 → 0.964) together with the dimension, but the cause is depth: layer3 (256-d) beats FV with 80× fewer dimensions. Dimension measures size, not how linearly separable the classes are. This agrees with off-the-shelf CNN results (Donahue et al., 2014; Razavian et al., 2014; Chatfield et al., 2014) and with the increasing semantic level of deeper layers (Zeiler & Fergus, 2014; Yosinski et al., 2014).
+> Handcrafted pipelines fix the local descriptor (SIFT gradient histograms of small patches), learn the codebook without labels and pool the codes in an orderless way. The only part learned from labels is the linear SVM. A pretrained CNN learns a non-linear hierarchy end-to-end from 1.28 M labeled ImageNet images, which include classes very close to ours (airliners, car types, mopeds, horses). Its last-layer units have receptive fields covering most of the image and respond to object parts and objects rather than to gradients. The result is a large gap: ResNet-18 layer4 reaches 0.964 test mAP against 0.784 for FV, 0.746 for VLAD and 0.694 for BoVW. The gap is largest on the classes BoVW found hardest (motorbike 0.632 → 0.974, horse 0.662 → 0.954). Extraction is also cheaper on our CPU (18 ms vs. 220–280 ms per image), as is inference (4 µs vs. up to 460 µs). A higher dimension does not imply a better AP. The 512-d layer4 beats the 20 608-d FV by 0.18, layer2 with 128 dimensions already matches FV, and the best model, DINOv2 (Stage B), has the smallest feature (384-d, 0.984). Within ResNet, AP grows from layer2 to layer4 (0.781 → 0.903 → 0.964) together with the dimension, but the cause is depth: layer3 (256-d) beats FV with 80× fewer dimensions. Dimension measures size, not how linearly separable the classes are. This agrees with off-the-shelf CNN results (Donahue et al., 2014; Razavian et al., 2014; Chatfield et al., 2014) and with the increasing semantic level of deeper layers (Zeiler & Fergus, 2014; Yosinski et al., 2014).
 
 ---
 
@@ -126,7 +126,7 @@ Contagens úteis (split de teste, positivos contra 1077 imagens de background): 
 
 **Os dados:**
 - **Flip no treino:** a diferença é ≤ 0.005 em todos os tamanhos (1 positivo: 0.784 contra 0.779, ± 0.06; todos: 0.982 contra 0.980). Está dentro do desvio.
-- **Flip no teste (TTA):** com treino com flip, no_tta dá 0.9823, score_avg 0.9816 e feature_avg 0.9818. Não há ganho.
+- **Flip no teste (TTA, medido no val):** com treino com flip, no_tta dá 0.9823, score_avg 0.9816 e feature_avg 0.9818. Não há ganho.
 
 **O raciocínio:**
 - **Quando prejudica:** quando o rótulo depende da orientação:
@@ -151,7 +151,7 @@ Contagens úteis (split de teste, positivos contra 1077 imagens de background): 
 - O caso em que o flip prejudica é o argumento clássico para o MNIST e o texto (Simard et al., 2003).
 
 **Proposta de resposta:**
-> Flipping harms recognition when the label depends on left-right orientation: text, digits and traffic signs, chiral or side-specific categories (left vs. right hand, steering-wheel side, turn-left arrows), or scenes with a fixed layout when spatial information is used. For our five categories, flipping preserves the label, so no harm is expected, and none is observed. It also brings no gain: training with flips changes validation mAP by at most 0.005 (0.784 vs. 0.779 with one positive, within ± 0.06; 0.982 vs. 0.980 with all), and test-time flipping does not help either (0.9823 without TTA, 0.9816 averaging scores, 0.9818 averaging features). DINOv2 was pretrained with random horizontal flips, so an image and its mirror image get almost the same embedding, and the flipped copy adds little information. Averaging features is not in general equivalent to averaging classifier scores. For a linear score s(x) = w·φ(x) + b the two coincide only if the feature map φ is linear. We L2-normalize, so feature averaging scores (x + x')/‖x + x'‖, while score averaging uses x/‖x‖ and x'/‖x'‖. The difference is a per-image scale factor (≈ 1/cos(θ/2), with θ the angle between the two features) that can change the ranking. Here θ is small, hence the nearly identical results. With non-linear classifiers (kernel SVM, MLP) or when averaging images before a non-linear network, the two are clearly different.
+> Flipping harms recognition when the label depends on left-right orientation: text, digits and traffic signs, chiral or side-specific categories (left vs. right hand, steering-wheel side, turn-left arrows), or scenes with a fixed layout when spatial information is used. For our five categories, flipping preserves the label, so no harm is expected, and none is observed. It also brings no gain: training with flips changes validation mAP by at most 0.005 (0.784 vs. 0.779 with one positive, within ± 0.06; 0.982 vs. 0.980 with all), and test-time flipping, measured on validation, does not help either (0.9823 without TTA, 0.9816 averaging scores, 0.9818 averaging features). DINOv2 was pretrained with random horizontal flips, so an image and its mirror image get almost the same embedding, and the flipped copy adds little information. Averaging features is not in general equivalent to averaging classifier scores. For a linear score s(x) = w·φ(x) + b the two coincide only if the feature map φ is linear. We L2-normalize, so feature averaging scores (x + x')/‖x + x'‖, while score averaging uses x/‖x‖ and x'/‖x'‖. The difference is a per-image scale factor (≈ 1/cos(θ/2), with θ the angle between the two features) that can change the ranking. Here θ is small, hence the nearly identical results. With non-linear classifiers (kernel SVM, MLP) or when averaging images before a non-linear network, the two are clearly different.
 
 ---
 
@@ -202,7 +202,6 @@ Contagens úteis (split de teste, positivos contra 1077 imagens de background): 
 | aeroplane AP | 0.982 | 0.998 |
 
 - **O person em zero-shot está perto do acaso:** um ranking aleatório teria AP igual à prevalência, 983 / 2060 = 0.477.
-- **Ranking:** o zero-shot tem P@10 = 1.000 mas P@100 = 0.900. O topo da lista está bom, e os erros estão na cauda.
 - **Classificação a 6 classes:** accuracy 0.602.
   - motorbike e horse têm recall alto (0.97) e precision baixa (0.38 e 0.20);
   - 106 imagens de background são classificadas como horse e 288 como person;
@@ -218,7 +217,7 @@ Contagens úteis (split de teste, positivos contra 1077 imagens de background): 
 **Literatura:** está de acordo. Radford et al. (2021) mostram que uma sonda linear nos embeddings CLIP supera o zero-shot quando há exemplos rotulados. Liang et al. (2022) descrevem o modality gap. O zero-shot tem a vantagem de não precisar de rótulos e de aceitar categorias novas por texto.
 
 **Proposta de resposta:**
-> Zero-shot CLIP is a linear classifier whose weight vector is the text embedding of the class prompt, with no bias and no image from our dataset involved. It measures how well an image matches a sentence, not what separates this category from this dataset's background. The SVM uses the same image embeddings but learns w and b from labeled images. It therefore adapts to the actual negatives and to this dataset's definition of each category (e.g., "person" includes crowds, riders and cyclists). On the same embeddings the SVM reaches 0.991 test mAP against 0.826 for zero-shot. The gap is largest for person (0.991 vs. 0.583, barely above the 0.477 of a random ranking at this prevalence) and horse (0.992 vs. 0.811), and smallest for aeroplane (0.998 vs. 0.982). Zero-shot ranks the clearest examples first (P@10 = 1.000) but degrades in the tail (P@100 = 0.900). Its 6-way classification reaches 0.602 accuracy. Motorbike and horse have high recall (0.97) but low precision (0.38 and 0.20), because neighbouring concepts that are not among the prompts take their place: bicycles become motorbikes, cows and sheep horses, birds in the sky aeroplanes, buses cars (Stage F). A single "background scene" prompt also cannot model an open, heterogeneous negative class: 288 background images are labeled person and 239 person images background. The missed persons are typically small people in scenes whose main concept is something else (a bicycle race, horses), which the SVM has learned to accept from labeled examples. Zero-shot needs no labels and accepts new categories as text; the SVM needs labels but is far more accurate. This agrees with Radford et al. (2021), where a linear probe on CLIP features outperforms zero-shot once labeled data is available, and with the image–text modality gap (Liang et al., 2022).
+> Zero-shot CLIP is a linear classifier whose weight vector is the text embedding of the class prompt, with no bias and no image from our dataset involved. It measures how well an image matches a sentence, not what separates this category from this dataset's background. The SVM uses the same image embeddings but learns w and b from labeled images. It therefore adapts to the actual negatives and to this dataset's definition of each category (e.g., "person" includes crowds, riders and cyclists). On the same embeddings the SVM reaches 0.991 test mAP against 0.826 for zero-shot. The gap is largest for person (0.991 vs. 0.583, barely above the 0.477 of a random ranking at this prevalence) and horse (0.992 vs. 0.811), and smallest for aeroplane (0.998 vs. 0.982). Its 6-way classification reaches 0.602 accuracy. Motorbike and horse have high recall (0.97) but low precision (0.38 and 0.20), because neighbouring concepts that are not among the prompts take their place: bicycles become motorbikes, cows and sheep horses, birds in the sky aeroplanes, buses cars (Stage F). A single "background scene" prompt also cannot model an open, heterogeneous negative class: 288 background images are labeled person and 239 person images background. The missed persons are typically small people in scenes whose main concept is something else (a bicycle race, horses), which the SVM has learned to accept from labeled examples. Zero-shot needs no labels and accepts new categories as text; the SVM needs labels but is far more accurate. This agrees with Radford et al. (2021), where a linear probe on CLIP features outperforms zero-shot once labeled data is available, and with the image–text modality gap (Liang et al., 2022).
 
 ---
 

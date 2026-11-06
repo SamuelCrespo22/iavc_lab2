@@ -5,13 +5,11 @@ Evaluates the encodings written by `python -m src.extract_deep -m dinov2_vits14`
   dinov2_vits14_cls        global image embedding (CLS token, 384-d)
   dinov2_vits14_patchmean  mean of the patch tokens (384-d; optional extension)
 
-plus, for comparison when available, ResNet-18 layer4, the torchvision ViT-B/32
-class token and the CLIP image embedding. For each encoding and feature map
-(none / L2; DINOv2 and ViT features are signed, so no square root), trains
-the Part 1 linear SVM per category and reports per-class AP and mAP; the
-feature map is selected on mean validation AP.
+plus, for comparison when available, the torchvision ViT-B/32 class token and
+the CLIP image embedding. Features are L2-normalized, as in Stage A. Trains the
+Part 1 linear SVM per category and reports per-class AP and mAP.
 
-Confusion matrix: each test image is assigned to the category whose SVM gives
+Confusion matrix (DINOv2 encodings only): each test image is assigned to the category whose SVM gives
 the highest score, or to "background" when every score is negative. Images of
 several categories (e.g. horse + person) have no single true class and are left
 out; their number is reported. The one-vs-background SVM scores are not
@@ -22,7 +20,7 @@ Results: <out>/part4_dino_grid.csv, <out>/part4_dino_encodings.csv,
 
 Usage (from the directory containing README.md):
     python -m runs.run_part4_dino
-    python -m runs.run_part4_dino --compare resnet18_layer4
+    python -m runs.run_part4_dino --compare
 """
 
 import argparse
@@ -35,34 +33,22 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
-from runs.run_part1 import CATEGORIES, l2, loadData, trainAndEvaluate
+from runs.run_part1 import CATEGORIES, loadData, trainAndEvaluate
 from runs.run_part2 import ENCODINGS_DIR
-from runs.run_part4_resnet import deepEncodingInfo, summarize
+from runs.run_part4_resnet import deepEncodingInfo, deepTransform, summarize
 
 PROTOCOL_DIR = Path("data/splits_protocol")
 DINO_ENCODINGS = ["dinov2_vits14_cls", "dinov2_vits14_patchmean"]
-
-FEATURE_MAPS = {
-    "none": lambda x: x,
-    "l2": l2,
-}
-
-
-def transformFor(feature_map):
-    return lambda x: FEATURE_MAPS[feature_map](x.astype(np.float64))
-
 
 def runGrid(encodings, categories, C):
     rows, models = [], {}
     for encoding in encodings:
         for category in categories:
-            data = loadData(category, encoding)
-            for fm in FEATURE_MAPS:
-                res, models[encoding, fm, category] = trainAndEvaluate(
-                    data, transformFor(fm), C, return_model=True)
-                rows.append({"encoding": encoding, "feature_map": fm, "category": category, **res})
-                print(f"{encoding:24s} {category:10s} {fm:5s} dim={res['dim']:4d} "
-                      f"AP train={res['ap_train']:.3f} val={res['ap_val']:.3f} test={res['ap_test']:.3f}")
+            res, models[encoding, category] = trainAndEvaluate(
+                loadData(category, encoding), deepTransform, C, return_model=True)
+            rows.append({"encoding": encoding, "feature_map": "l2", "category": category, **res})
+            print(f"{encoding:24s} {category:10s} dim={res['dim']:4d} "
+                  f"AP train={res['ap_train']:.3f} val={res['ap_val']:.3f} test={res['ap_test']:.3f}")
     return pd.DataFrame(rows), models
 
 
@@ -112,11 +98,10 @@ def saveConfusion(cm, classes, title, path):
     plt.close(fig)
 
 
-def confusionMatrix(encoding, fm, models, categories, out_dir):
-    names, x, label_sets = loadMultiClassTest(encoding, categories)
-    x = transformFor(fm)(x)
-    scores = np.stack([x @ models[encoding, fm, c][0] + models[encoding, fm, c][1]
-                       for c in categories], axis=1)
+def confusionMatrix(encoding, models, categories, out_dir):
+    _, x, label_sets = loadMultiClassTest(encoding, categories)
+    x = deepTransform(x)
+    scores = np.stack([x @ models[encoding, c][0] + models[encoding, c][1] for c in categories], axis=1)
 
     keep, true = singleLabels(label_sets)
     scores = scores[keep]
@@ -125,11 +110,11 @@ def confusionMatrix(encoding, fm, models, categories, out_dir):
 
     classes = categories + ["background"]
     cm = confusion_matrix(true, pred, labels=classes)
-    saveConfusion(cm, classes, f"{encoding} ({fm}): test confusion matrix",
+    saveConfusion(cm, classes, f"{encoding}: test confusion matrix",
                   out_dir / f"part4_dino_confusion_{encoding}")
 
     objects = true != "background"
-    print(f"\n=== {encoding} ({fm}): confusion matrix on {keep.sum()} test images "
+    print(f"\n=== {encoding}: confusion matrix on {keep.sum()} test images "
           f"({(~keep).sum()} multi-category images left out) ===")
     print(pd.DataFrame(cm, index=classes, columns=classes).to_string())
     print(classification_report(true, pred, labels=classes, zero_division=0))
@@ -140,7 +125,7 @@ def confusionMatrix(encoding, fm, models, categories, out_dir):
 def parseArgs():
     parser = argparse.ArgumentParser(description="Part 4 Stage B: frozen DINOv2 features + linear SVM.")
     parser.add_argument("--categories", nargs="+", default=CATEGORIES)
-    parser.add_argument("--compare", nargs="*", default=["resnet18_layer4", "vit_b_32", "clip_vit_b_32"],
+    parser.add_argument("--compare", nargs="*", default=["vit_b_32", "clip_vit_b_32"],
                         help="Other src.extract_deep encodings to evaluate alongside DINOv2")
     parser.add_argument("--C", type=float, default=10.0, help="SVM C (fixed, as in Part 1)")
     parser.add_argument("--out", default="results")
@@ -163,6 +148,7 @@ if __name__ == "__main__":
     grid, models = runGrid(encodings, args.categories, args.C)
     grid.to_csv(out_dir / "part4_dino_grid.csv", index=False)
 
-    for encoding, fm in summarize(grid, info):
-        confusionMatrix(encoding, fm, models, args.categories, out_dir)
+    summarize(grid, info)
+    for encoding in DINO_ENCODINGS:
+        confusionMatrix(encoding, models, args.categories, out_dir)
     print(f"\nResults written to {out_dir.resolve()}")

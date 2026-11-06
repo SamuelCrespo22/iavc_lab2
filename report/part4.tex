@@ -1,42 +1,45 @@
-% ---------------------------------------------------------------------------
-% Parte 4 — requer no preâmbulo: \usepackage{booktabs,graphicx}
-% Figuras: copiar de code/results/ para figures/:
-%   part4_fewshot.png, part4_svm_c.png, part4_examples_dinov2.png
-% ---------------------------------------------------------------------------
-\section{Representações pré-treinadas: CNN, DINOv2 e CLIP}
+\section{Pretrained visual representations: CNN, DINOv2 and CLIP }
 \label{sec:part4}
 
 \paragraph{Protocolo.}
-Usamos as features congeladas da Sec.~\ref{sec:method}: ResNet-18
-\cite{he2016resnet}, ViT-B/32 \cite{dosovitskiy2021vit}, DINOv2 ViT-S/14
-\cite{oquab2024dinov2} (CLS e, como extensão, a média dos patch tokens) e
-CLIP ViT-B/32 \cite{radford2021clip}. O mapa de features (nenhum, L2,
-$\sqrt{\cdot}$+L2) é escolhido no val mAP, e o L2 ganhou em todos os
-modelos.
+Todos os modelos estão congelados e usam o pré-processamento oficial (crop
+central de 224\,px): ResNet-18 \cite{he2016resnet} e ViT-B/32
+\cite{dosovitskiy2021vit} com pesos ImageNet do torchvision, DINOv2 ViT-S/14
+\cite{oquab2024dinov2} e CLIP ViT-B/32 \cite{radford2021clip}. Na ResNet
+usamos o \emph{global average pooling} dos três últimos stages. No DINOv2
+usamos o token CLS e, como extensão, a média dos 256 patch tokens. Os splits e
+o SVM ($C=10$) são os das partes anteriores, e as features deep são
+normalizadas em L2. Nas Stages D--E, o $C$ e os prompts são escolhidos no val
+mAP. A extração foi medida em CPU sobre as 4946 imagens, incluindo o
+carregamento do modelo, a leitura do JPEG e o pré-processamento. Nos
+handcrafted usamos os tempos da Parte~2, medidos em 5 imagens, por isso a
+comparação de tempos é aproximada. A inferência é o mapa de features mais o
+SVM (ou a semelhança ao texto), por imagem de test.
 
-\begin{table*}[t]
+\begin{table*}[h]
 \centering
-\caption{AP de test por categoria (SVM linear, $C=10$, mapa escolhido no val).
-As linhas handcrafted são as escolhas da Parte~2. Extração em CPU por imagem.}
+\caption{AP de test por categoria (SVM linear, $C=10$; features deep em L2).
+As linhas handcrafted são as escolhas da Parte~2. Extração e inferência em CPU,
+por imagem.}
 \label{tab:part4}
 \small
 \resizebox{\linewidth}{!}{%
-\begin{tabular}{lrrrrrrrr}
+\begin{tabular}{lrrrrrrrrr}
 \toprule
-Representação & mbike & aero & person & horse & car & mAP & $d$ & Extr.\ (ms) \\
+Representação & mbike & aero & person & horse & car & mAP & $d$ & Extr.\ (ms) & Inf.\ ($\mu$s) \\
 \midrule
-BoVW $K{=}512$, Hellinger     & .632 & .691 & .750 & .662 & .734 & .694 &  2048 & 240 \\
-VLAD $K{=}32$                 & .707 & .726 & .768 & .735 & .793 & .746 & 10240 & 207 \\
-FV $K{=}32$                   & .783 & .759 & .811 & .758 & .807 & .784 & 20608 & 296 \\
+BoVW $K{=}512$, Hellinger     & .632 & .691 & .750 & .662 & .734 & .694 &  2048 & 254 &  34 \\
+VLAD $K{=}32$                 & .707 & .726 & .768 & .735 & .793 & .746 & 10240 & 224 & 336 \\
+FV $K{=}32$                   & .783 & .759 & .811 & .758 & .807 & .784 & 20608 & 278 & 463 \\
 \midrule
-ResNet-18 layer2              & .767 & .768 & .857 & .725 & .786 & .781 &   128 &  18 \\
-ResNet-18 layer3              & .894 & .881 & .963 & .876 & .902 & .903 &   256 &  18 \\
-ResNet-18 layer4              & .974 & .968 & .973 & .954 & .954 & .964 &   512 &  18 \\
-ViT-B/32 (ImageNet)           & .982 & .987 & .937 & .954 & .945 & .961 &   768 &  35 \\
-DINOv2 ViT-S/14, CLS          & .982 & 1.00 & .978 & .994 & .951 & .981 &   384 &  52 \\
-DINOv2 ViT-S/14, média patches & .980 & 1.00 & .988 & .985 & .967 & .984 &   384 &  52 \\
-CLIP ViT-B/32 + SVM           & .994 & .998 & .991 & .992 & .979 & \textbf{.991} & 512 & 35 \\
-CLIP zero-shot (``a photo of a \dots'') & .889 & .982 & .583 & .811 & .865 & .826 & 512 & 35 \\
+ResNet-18 layer2              & .767 & .768 & .857 & .725 & .786 & .781 &   128 &  18 & 0.8 \\
+ResNet-18 layer3              & .894 & .881 & .963 & .876 & .902 & .903 &   256 &  18 & 1.7 \\
+ResNet-18 layer4              & .974 & .968 & .973 & .954 & .954 & .964 &   512 &  18 & 4.3 \\
+ViT-B/32 (ImageNet)           & .982 & .987 & .937 & .954 & .945 & .961 &   768 &  35 & 6.8 \\
+DINOv2 ViT-S/14, CLS          & .982 & 1.00 & .978 & .994 & .951 & .981 &   384 &  52 & 3.5 \\
+DINOv2 ViT-S/14, média patches & .980 & 1.00 & .988 & .985 & .967 & .984 &   384 &  52 & 3.2 \\
+CLIP ViT-B/32 + SVM           & .994 & .998 & .991 & .992 & .979 & \textbf{.991} & 512 & 35 & 5.4 \\
+CLIP zero-shot (``a photo of a \dots'') & .889 & .982 & .583 & .811 & .865 & .826 & 512 & 35 & 2.9 \\
 \bottomrule
 \end{tabular}}
 \end{table*}
@@ -55,13 +58,14 @@ layer4 (512-d) supera o FV (20\,608-d) por 0.18, o layer3 (256-d) já o supera
 com 80$\times$ menos dimensões, e o melhor modelo visual, o DINOv2, tem só
 384-d. Dentro da ResNet, o AP sobe com a profundidade (0.781$\to$0.903$\to$0.964),
 não por haver mais dimensões \cite{razavian2014,chatfield2014}. A extração
-é também mais barata em CPU (18 contra 210--300\,ms por imagem).
+é também mais barata em CPU (18 contra 220--280\,ms por imagem), e a
+inferência, com vetores mais curtos, também (4 contra 34--460\,$\mu$s).
 
 \paragraph{DINOv2 (Stage B).}
 Com um SVM linear sobre o DINOv2 congelado obtemos 0.981 (CLS) e 0.984 (média
 dos patches), acima da ResNet-18 (0.964) e do ViT-B/32 supervisionado
-(0.961). A arquitetura é a mesma família, por isso a diferença vem do
-pré-treino. O DINOv2 foi treinado sem labels em 142\,M imagens, com objetivos
+(0.961). Face ao ViT-B/32, o DINOv2 é um transformer mais pequeno (com
+patches mais finos), por isso a diferença vem sobretudo do pré-treino. O DINOv2 foi treinado sem labels em 142\,M imagens, com objetivos
 que obrigam vistas diferentes da mesma imagem a ter o mesmo embedding. Imagens
 semanticamente próximas ficam juntas, e categorias como ``cavalo'' formam
 grupos quase linearmente separáveis. As invariâncias difíceis (pose,
@@ -77,7 +81,7 @@ contra 21 com a média (Tab.~\ref{tab:part4conf}). As imagens de background
 classificadas como person descem de 67 para 31. Como os SVMs
 one-vs-background não estão calibrados entre si, a comparação é indicativa.
 
-\begin{table*}[t]
+\begin{table*}[h]
 \centering
 \caption{Matrizes de confusão de test (linhas: verdade; colunas: previsão),
 só imagens com uma categoria. DINOv2: SVM com score máximo, ou background se
@@ -102,7 +106,7 @@ bg     &  1 &  0 &  31 &  0 &  24 & 1021 & &  31 &  42 & 288 & 106 &  32 & 578 \
 \end{tabular}
 \end{table*}
 
-\begin{figure*}[t]
+\begin{figure*}[h]
 \centering
 \includegraphics[width=\linewidth]{figures/part4_fewshot.png}
 \caption{Stage C, DINOv2 CLS + SVM linear: val AP em função do número de
@@ -111,7 +115,7 @@ desvio em 5 sorteios).}
 \label{fig:part4fewshot}
 \end{figure*}
 
-\begin{figure}[t]
+\begin{figure}[h]
 \centering
 \includegraphics[width=\linewidth]{figures/part4_svm_c.png}
 \caption{Stage D, DINOv2 CLS + SVM linear: mAP de treino e de validação em
@@ -132,9 +136,10 @@ Continuam a melhorar as classes com mais variação intra-classe, person
 com 20. Com 1 positivo, o resultado depende da imagem sorteada (motorbike
 $\pm0.36$). O flip horizontal prejudica quando o label depende da orientação
 (texto, dígitos, sinais, objetos com lado definido). Nas nossas classes
-preserva o label e não muda nada: altera o val mAP no máximo 0.005, e no test
-(TTA, condição separada) dá 0.9823 sem TTA, 0.9816 com a média dos scores e
-0.9818 com a média das features. Plausivelmente porque o DINOv2 já foi
+preserva o label e não muda nada: altera o val mAP no máximo 0.005. O flip no
+teste (TTA, condição separada, medida no val com todos os positivos) também
+não ajuda: 0.9823 sem TTA, 0.9816 com a média dos scores e 0.9818 com a
+média das features. Plausivelmente porque o DINOv2 já foi
 treinado com flips. As duas médias não são equivalentes em geral: para
 $s(x)=\mathbf{w}^\top\phi(x)+b$ só coincidem se $\phi$ for linear. Com L2,
 para duas features unitárias a um ângulo $\theta$, a média das features
@@ -151,10 +156,10 @@ $\mathbf{w}$ é fixado por poucos support vectors e varia muito com a amostra.
 Um $C$ pequeno troca variância por bias, e o desvio também desce. Com todos os
 positivos aparece a curva clássica: $C=0.1$ sub-ajusta (treino 0.987), $C\ge100$
 sobreajusta (treino 1.000, val 0.972), e o ótimo é $C=1$ (0.989). O $C$ ótimo
-cresce com os dados. Avaliados uma vez no test, os $C$ escolhidos dão 0.949 (5
-positivos) e 0.987 (todos), acima dos 0.981 com o $C=10$ fixo.
+cresce com os dados. Avaliados uma vez no test, os $C$ escolhidos dão 0.949 com 5
+positivos e 0.987 com todos, este acima dos 0.981 do $C=10$ fixo.
 
-\begin{table}[t]
+\begin{table}[h]
 \centering
 \caption{CLIP zero-shot: AP de validação por conjunto de prompts. Só o
 conjunto escolhido (``photo'') foi avaliado no test.}
@@ -203,7 +208,7 @@ tornaria a comparação injusta \cite{cawley2010}. O risco é real: o conjunto
 escolhido cai de 0.857 (val) para 0.826 (test), mais do que toda a diferença
 entre conjuntos.
 
-\begin{figure*}[t]
+\begin{figure*}[h]
 \centering
 \includegraphics[width=\linewidth]{figures/part4_examples_dinov2.png}
 \caption{DINOv2 (média patches) + SVM: verdadeiros positivos com score mais

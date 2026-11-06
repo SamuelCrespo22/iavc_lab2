@@ -13,6 +13,7 @@ Setup, the same for every stage:
 - Figures of Stages A–D: `python -m runs.run_part1_inspect`.
 - Environment: AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD, no GPU used; Python 3.11.9, numpy 2.4.6, scikit-learn 1.9.1, torch 2.14.0, torchvision 0.29.0, cyvlfeat 0.7.1.
 
+
 ## Part 2 — Advanced encodings: VLAD and Fisher Vectors
 
 Setup, the same for every stage:
@@ -44,7 +45,7 @@ Setup, the same for every table:
 Protocol, the same for every stage:
 
 - Splits: every method reads the same `data/splits_protocol` lists (train / validation = 80 / 20 of the supplied train files, test = the supplied val files): the same images, in the same order, with the same labels; no image is in two subsets.
-- Selection: every choice (feature map, C, prompt set) is made on validation AP; the test set only reports the chosen setting. C = 10 and the L2 map are fixed in advance where nothing is chosen.
+- Selection: deep features are L2-normalized and the SVM uses C = 10, both fixed in advance; the choices of Stages D and E (C, prompt set) are made on validation AP and the test set only reports the chosen setting.
 - Costs: feature dimension and extraction time per image are stored by `src.extract_deep` in `meta.json` (forward pass on CPU over all 4946 images, original + flip, including model loading, JPEG decoding and preprocessing). Inference = feature map + linear SVM per test image, features already extracted.
 - Models (frozen, official preprocessing, center crop 224): ResNet-18 and ViT-B/32 with torchvision `IMAGENET1K_V1` weights; DINOv2 ViT-S/14 from torch.hub `facebookresearch/dinov2`; CLIP ViT-B/32 from `openai/CLIP`.
 - Environment: AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD, no GPU used; Python 3.11.9, numpy 2.4.6, scikit-learn 1.9.1, torch 2.14.0, torchvision 0.29.0, cyvlfeat 0.7.1.

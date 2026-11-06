@@ -53,5 +53,3 @@ Comparison of the three encodings (selected settings). Codebook fit = PCA + k-me
 | fv_K32_C80   | 0.784 | 20608 | float64 |        161.000 |   837.738 |           36.302 |             152.118 |               126.003 |         2.058 |    388.536 |
 | fv_K64_C80   | 0.803 | 41216 | float64 |        322.000 |  1688.463 |           55.741 |             152.118 |               174.649 |         3.281 |    807.297 |
 
-Precision–recall curves and P@K of BoVW, VLAD K = 32 and FV K = 32 are in the Part 4 report (`part4_pr_curves.png`, ranking table).
-

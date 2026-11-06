@@ -10,7 +10,7 @@ Os 2x2 tiles guardam em que quadrante aparece cada palavra (céu em cima, rodas 
 
 #### Como é que o tamanho do vocabulário afeta capacidade, erro de quantização, computação e armazenamento?
 
-Um K maior reduz o erro de quantização (0.476 → 0.418 de K = 256 para 1024, quase igual em treino e test) e aumenta a capacidade. O custo cresce linearmente com K: fit do k-means 31 → 87 s, extração 180 → 304 ms por imagem, 8 → 32 KB por imagem, treino do SVM 0.07 → 0.28 s. O ganho de AP satura a partir de K = 512.
+Um K maior reduz o erro de quantização (0.476 → 0.419 de K = 256 para 1024, quase igual em treino e test) e aumenta a capacidade. O custo cresce linearmente com K: fit do k-means 31 → 87 s, extração 186 → 282 ms por imagem, 8 → 32 KB por imagem, treino do SVM 0.07 → 0.28 s. O ganho de AP satura a partir de K = 512.
 
 ## Stage B
 

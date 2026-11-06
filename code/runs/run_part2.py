@@ -135,6 +135,10 @@ def measureEncodings(encodings, num_images):
         images = [f"data/images/{name}.jpg" for name in names[:num_images]]
         encoders = {e: ImageEncoder(ENCODERS_DIR / f"{e}.npz") for e in encodings}
         sift_times, enc_times = [], {e: [] for e in encodings}
+        # Untimed warm-up: the first call pays one-off setup, which would land on encodings[0].
+        warm = encoders[encodings[0]].computeFeatures(images[0])
+        for encoder in encoders.values():
+            encoder.encode_tiling(*warm)
         for image in images:
             start = time.perf_counter()
             kpts, desc, isize = encoders[encodings[0]].computeFeatures(image)

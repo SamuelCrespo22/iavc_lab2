@@ -10,7 +10,7 @@ Guarda onde aparecem as palavras (céu em cima e avião ao centro; rodas em baix
 
 #### Efeito do K:
 
-Mais capacidade e menos erro de quantização (0.476 → 0.418). Em troca, custo linear em K para k-means, atribuição, armazenamento e SVM, e cada histograma fica mais esparso. Os números estão todos na tabela acima.
+Mais capacidade e menos erro de quantização (0.476 → 0.419). Em troca, custo linear em K para k-means, atribuição, armazenamento e SVM, e cada histograma fica mais esparso. Os números estão todos na tabela acima.
 
 ## Stage B
 

@@ -4,7 +4,7 @@
 
 O pipeline handcrafted fixa o descritor local (histogramas de gradientes), aprende o codebook sem labels e agrega sem ordem; só o SVM usa labels. Uma CNN pré-treinada aprende uma hierarquia não-linear com 1.28 M imagens rotuladas do ImageNet, que inclui classes próximas das nossas, e as unidades do layer4 respondem a partes e objetos.
 
-O resultado é um salto grande: a ResNet-18 layer4 obtém 0.964 de test mAP, contra 0.784 (FV), 0.746 (VLAD) e 0.694 (BoVW). Também extrai mais depressa no CPU (18 contra 210–300 ms por imagem).
+O resultado é um salto grande: a ResNet-18 layer4 obtém 0.964 de test mAP, contra 0.784 (FV), 0.746 (VLAD) e 0.694 (BoVW). Também extrai mais depressa no CPU (18 contra 220–280 ms por imagem).
 
 Mais dimensão não implica melhor AP:
 - o layer4 (512-d) bate o FV (20 608-d) por 0.18;
@@ -39,7 +39,7 @@ A curva satura cedo: de 20 positivos para todos (4–40× mais labels) ganha só
 
 O flip prejudica quando o label depende da orientação: texto, dígitos, sinais de trânsito, objetos com lado definido. Nas nossas 5 classes preserva o label, e não prejudica nem ajuda:
 - no treino muda o val mAP no máximo 0.005;
-- no test (TTA) dá 0.9823 sem TTA, 0.9816 com média dos scores e 0.9818 com média das features.
+- no teste (TTA, medido no val) dá 0.9823 sem TTA, 0.9816 com média dos scores e 0.9818 com média das features.
 
 Plausivelmente é porque o DINOv2 já foi treinado com flips, e as duas vistas têm quase o mesmo embedding.
 

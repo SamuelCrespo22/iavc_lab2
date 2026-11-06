@@ -2,53 +2,31 @@
 
 ## Stage A — frozen CNN features (ResNet-18)
 
-> Global average pooling of each of the 3 last ResNet-18 stages, linear SVM on the frozen features, compared with the BoVW / VLAD / FV settings selected in Part 2.
+> Global average pooling of each of the 3 last ResNet-18 stages, L2, linear SVM on the frozen features, compared with the BoVW / VLAD / FV settings selected in Part 2 (their costs as measured in Part 2).
 
-Validation mAP per feature map. The map with the highest validation mAP is selected:
+Test AP per category and mAP, validation mAP, feature dimension, extraction time and inference cost per image:
 
-| encoding        | none   | l2    | sqrt_l2   | ssr_intra_l2   | ssr_l2   | selected     |
-|:----------------|:-------|:------|:----------|:---------------|:---------|:-------------|
-| resnet18_layer2 | 0.803  | 0.814 | 0.792     | –              | –        | l2           |
-| resnet18_layer3 | 0.903  | 0.906 | 0.905     | –              | –        | l2           |
-| resnet18_layer4 | 0.955  | 0.969 | 0.968     | –              | –        | l2           |
-| bovw_K512_C0    | –      | –     | 0.717     | –              | –        | sqrt_l2      |
-| vlad_K32_C80    | –      | –     | –         | 0.793          | –        | ssr_intra_l2 |
-| fv_K32_C80      | –      | –     | –         | –              | 0.784    | ssr_l2       |
-
-Test AP of the selected setting, with feature dimension, extraction time and inference cost per image:
-
-| encoding        |   motorbike |   aeroplane |   person |   horse |   car |   mAP |   dim |   extract_ms_per_image |   infer_us_per_image |
-|:----------------|------------:|------------:|---------:|--------:|------:|------:|------:|-----------------------:|---------------------:|
-| resnet18_layer2 |       0.767 |       0.768 |    0.857 |   0.725 | 0.786 | 0.781 |   128 |                 18.257 |                0.725 |
-| resnet18_layer3 |       0.894 |       0.881 |    0.963 |   0.876 | 0.902 | 0.903 |   256 |                 18.257 |                1.597 |
-| resnet18_layer4 |       0.974 |       0.968 |    0.973 |   0.954 | 0.954 | 0.964 |   512 |                 18.257 |                3.133 |
-| bovw_K512_C0    |       0.632 |       0.691 |    0.750 |   0.662 | 0.734 | 0.694 |  2048 |                239.594 |               19.460 |
-| vlad_K32_C80    |       0.707 |       0.726 |    0.768 |   0.735 | 0.793 | 0.746 | 10240 |                207.029 |              227.124 |
-| fv_K32_C80      |       0.783 |       0.759 |    0.811 |   0.758 | 0.807 | 0.784 | 20608 |                295.513 |              360.781 |
+| encoding        |   motorbike |   aeroplane |   person |   horse |   car |   mAP |   mAP_val |   dim |   extract_ms_per_image |   infer_us_per_image |
+|:----------------|------------:|------------:|---------:|--------:|------:|------:|----------:|------:|-----------------------:|---------------------:|
+| resnet18_layer2 |       0.767 |       0.768 |    0.857 |   0.725 | 0.786 | 0.781 |     0.814 |   128 |                 18.257 |                0.836 |
+| resnet18_layer3 |       0.894 |       0.881 |    0.963 |   0.876 | 0.902 | 0.903 |     0.906 |   256 |                 18.257 |                1.676 |
+| resnet18_layer4 |       0.974 |       0.968 |    0.973 |   0.954 | 0.954 | 0.964 |     0.969 |   512 |                 18.257 |                4.318 |
+| bovw_K512_C0    |       0.632 |       0.691 |    0.750 |   0.662 | 0.734 | 0.694 |     0.717 |  2048 |                253.696 |               34.154 |
+| vlad_K32_C80    |       0.707 |       0.726 |    0.768 |   0.735 | 0.793 | 0.746 |     0.793 | 10240 |                224.262 |              336.258 |
+| fv_K32_C80      |       0.783 |       0.759 |    0.811 |   0.758 | 0.807 | 0.784 |     0.784 | 20608 |                278.121 |              463.240 |
 
 ## Stage B — DINOv2 ViT-S/14
 
-> Frozen DINOv2 global embedding (CLS token) + linear SVM: per-class AP, mAP, confusion matrix, dimension, extraction and inference cost. Optional extension: the mean of the patch tokens (`patchmean`). ResNet-18 layer4, the ViT-B/32 class token (the "CNN/ViT" row of the final table; signed features, so no square root) and CLIP are shown for reference.
+> Frozen DINOv2 global embedding (CLS token) + linear SVM: per-class AP, mAP, confusion matrix, dimension, extraction and inference cost. Optional extension: the mean of the patch tokens (`patchmean`). The ViT-B/32 class token (the "CNN/ViT" row of the final table) and CLIP are shown for reference.
 
-Validation mAP per feature map. The map with the highest validation mAP is selected:
+Test AP per category and mAP, validation mAP, feature dimension, extraction time and inference cost per image:
 
-| encoding                |   none |    l2 | selected   |
-|:------------------------|-------:|------:|:-----------|
-| dinov2_vits14_cls       |  0.966 | 0.980 | l2         |
-| dinov2_vits14_patchmean |  0.982 | 0.983 | l2         |
-| resnet18_layer4         |  0.955 | 0.969 | l2         |
-| vit_b_32                |  0.944 | 0.957 | l2         |
-| clip_vit_b_32           |  0.989 | 0.990 | l2         |
-
-Test AP of the selected setting, with feature dimension, extraction time and inference cost per image:
-
-| encoding                |   motorbike |   aeroplane |   person |   horse |   car |   mAP |   dim |   extract_ms_per_image |   infer_us_per_image |
-|:------------------------|------------:|------------:|---------:|--------:|------:|------:|------:|-----------------------:|---------------------:|
-| dinov2_vits14_cls       |       0.982 |       1.000 |    0.978 |   0.994 | 0.951 | 0.981 |   384 |                 52.278 |                2.538 |
-| dinov2_vits14_patchmean |       0.980 |       1.000 |    0.988 |   0.985 | 0.967 | 0.984 |   384 |                 52.278 |                2.242 |
-| resnet18_layer4         |       0.974 |       0.968 |    0.973 |   0.954 | 0.954 | 0.964 |   512 |                 18.257 |                3.354 |
-| vit_b_32                |       0.982 |       0.987 |    0.937 |   0.954 | 0.945 | 0.961 |   768 |                 35.005 |                5.757 |
-| clip_vit_b_32           |       0.994 |       0.998 |    0.991 |   0.992 | 0.979 | 0.991 |   512 |                 35.182 |                3.159 |
+| encoding                |   motorbike |   aeroplane |   person |   horse |   car |   mAP |   mAP_val |   dim |   extract_ms_per_image |   infer_us_per_image |
+|:------------------------|------------:|------------:|---------:|--------:|------:|------:|----------:|------:|-----------------------:|---------------------:|
+| dinov2_vits14_cls       |       0.982 |       1.000 |    0.978 |   0.994 | 0.951 | 0.981 |     0.980 |   384 |                 52.278 |                3.495 |
+| dinov2_vits14_patchmean |       0.980 |       1.000 |    0.988 |   0.985 | 0.967 | 0.984 |     0.983 |   384 |                 52.278 |                3.208 |
+| vit_b_32                |       0.982 |       0.987 |    0.937 |   0.954 | 0.945 | 0.961 |     0.957 |   768 |                 35.005 |                6.767 |
+| clip_vit_b_32           |       0.994 |       0.998 |    0.991 |   0.992 | 0.979 | 0.991 |     0.990 |   512 |                 35.182 |                5.364 |
 
 Test confusion matrix — `dinov2_vits14_cls` (rows: true, columns: predicted). Each image goes to the category whose SVM scores highest, or to background when every score is negative; images with several categories are left out.
 
@@ -199,33 +177,17 @@ Models: ResNet-18 layer4 and DINOv2 `patchmean`, both L2 + SVM with C = 10 (the 
 
 ## Required comparison table
 
-> One row per method. Within a method, the representation (layer or token, feature map) with the highest validation mAP. Every SVM uses C = 10, fixed in advance as in Part 1 (Stage D studies C separately). Extraction: deep models = forward pass on CPU (see the protocol above); handcrafted = dense SIFT + encoding on CPU, timed on 5 images. Inference: feature map + classifier (or text similarity) per image, features already extracted.
+> One row per method. Within a method, the representation (layer or token) with the highest validation mAP. Every SVM uses C = 10, fixed in advance as in Part 1 (Stage D studies C separately). Extraction: deep models = forward pass on CPU (see the protocol above); handcrafted = dense SIFT + encoding on CPU, timed on 5 images in Part 2. Inference: feature map + classifier (or text similarity) per image, features already extracted.
 
 | method                | representation                 | supervision                            | C   |   test mAP |   dim |   extract_ms_per_image |   infer_us_per_image |
 |:----------------------|:-------------------------------|:---------------------------------------|:----|-----------:|------:|-----------------------:|---------------------:|
-| BoVW + SVM            | bovw_K512_C0 (sqrt_l2)         | Task labels                            | 10  |      0.694 |  2048 |                239.594 |               19.460 |
-| VLAD + SVM            | vlad_K32_C80 (ssr_intra_l2)    | Task labels                            | 10  |      0.746 | 10240 |                207.029 |              227.124 |
-| Fisher Vector + SVM   | fv_K32_C80 (ssr_l2)            | Task labels                            | 10  |      0.784 | 20608 |                295.513 |              360.781 |
-| CNN (ResNet-18) + SVM | resnet18_layer4 (l2)           | Pretrained (ImageNet) + task labels    | 10  |      0.964 |   512 |                 18.257 |                3.133 |
-| ViT-B/32 + SVM        | vit_b_32 (l2)                  | Pretrained (ImageNet) + task labels    | 10  |      0.961 |   768 |                 35.005 |                5.757 |
-| DINOv2 + SVM          | dinov2_vits14_patchmean (l2)   | Self-supervised + task labels          | 10  |      0.984 |   384 |                 52.278 |                2.242 |
+| BoVW + SVM            | bovw_K512_C0 (sqrt_l2)         | Task labels                            | 10  |      0.694 |  2048 |                253.696 |               34.154 |
+| VLAD + SVM            | vlad_K32_C80 (ssr_intra_l2)    | Task labels                            | 10  |      0.746 | 10240 |                224.262 |              336.258 |
+| Fisher Vector + SVM   | fv_K32_C80 (ssr_l2)            | Task labels                            | 10  |      0.784 | 20608 |                278.121 |              463.240 |
+| CNN (ResNet-18) + SVM | resnet18_layer4 (l2)           | Pretrained (ImageNet) + task labels    | 10  |      0.964 |   512 |                 18.257 |                4.318 |
+| ViT-B/32 + SVM        | vit_b_32 (l2)                  | Pretrained (ImageNet) + task labels    | 10  |      0.961 |   768 |                 35.005 |                6.767 |
+| DINOv2 + SVM          | dinov2_vits14_patchmean (l2)   | Self-supervised + task labels          | 10  |      0.984 |   384 |                 52.278 |                3.208 |
 | CLIP zero-shot        | clip_vit_b_32, prompts (photo) | Image–text pretraining, no task labels | –   |      0.826 |   512 |                 35.182 |                2.948 |
-
-### Ranking metrics of the same methods
-
-Test set, mean over the 5 categories. Positive class: the category; negatives: background. AP = scikit-learn `average_precision_score` (sum over the ranking of precision × recall step, no interpolation). P@K / R@K: precision / recall of the top K images. `precision_thr0` / `recall_thr0`: classification at the SVM threshold 0 (none for zero-shot, which has no threshold). Per-category values are in `part4_ranking.csv`.
-
-| method                |    AP |   P@10 |   P@50 |   P@100 |   R@10 |   R@50 |   R@100 | precision_thr0   | recall_thr0   |
-|:----------------------|------:|-------:|-------:|--------:|-------:|-------:|--------:|:-----------------|:--------------|
-| BoVW + SVM            | 0.694 |  0.920 |  0.852 |   0.788 |  0.051 |  0.223 |   0.397 | 0.704            | 0.579         |
-| VLAD + SVM            | 0.746 |  1.000 |  0.948 |   0.824 |  0.053 |  0.249 |   0.414 | 0.806            | 0.543         |
-| Fisher Vector + SVM   | 0.784 |  1.000 |  0.960 |   0.840 |  0.053 |  0.256 |   0.426 | 0.833            | 0.577         |
-| CNN (ResNet-18) + SVM | 0.964 |  1.000 |  1.000 |   0.990 |  0.053 |  0.267 |   0.526 | 0.937            | 0.876         |
-| ViT-B/32 + SVM        | 0.961 |  1.000 |  1.000 |   0.996 |  0.053 |  0.267 |   0.531 | 0.930            | 0.870         |
-| DINOv2 + SVM          | 0.984 |  1.000 |  1.000 |   0.998 |  0.053 |  0.267 |   0.532 | 0.964            | 0.937         |
-| CLIP zero-shot        | 0.826 |  1.000 |  0.944 |   0.900 |  0.053 |  0.252 |   0.481 | –                | –             |
-
-![part4_pr_curves](part4_pr_curves.png)
 
 ## Limitations and deviations from the protocol
 

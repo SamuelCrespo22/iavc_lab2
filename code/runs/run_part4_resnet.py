@@ -1,9 +1,10 @@
 """Part 4, Stage A: frozen ResNet-18 features + linear SVM.
 
 Evaluates the ResNet-18 encodings written by src.extract_deep (GAP of layer2 /
-layer3 / layer4, 128 / 256 / 512-d) with the Part 1 linear SVM per category,
-over a few feature maps, against the BoVW / VLAD / FV settings selected in
-Part 2. Extract the features first:
+layer3 / layer4, 128 / 256 / 512-d, L2-normalized) with the Part 1 linear SVM
+per category, against the BoVW / VLAD / FV settings selected in Part 2 (their
+dimension, storage and extraction cost are read from part2_encodings.csv).
+Extract the features first:
 
     python -m src.extract_deep --flip
 
@@ -22,20 +23,16 @@ import numpy as np
 import pandas as pd
 
 from runs.run_part1 import CATEGORIES, l2, loadData, trainAndEvaluate
-from runs.run_part2 import ENCODINGS_DIR, measureEncodings, parseEncoding
+from runs.run_part2 import ENCODINGS_DIR, parseEncoding
 from runs.run_part2 import prepare as prepareHandcrafted
 
 # Same names as src.extract_deep (not imported: it loads torch, which clashes
 # with numpy's OpenMP runtime in the cvc-a2 env).
 LAYERS = ["layer2", "layer3", "layer4"]
 
-# Pooled ResNet activations come after a ReLU, so they are non-negative and the
-# Hellinger map applies as for BoVW.
-FEATURE_MAPS = {
-    "none": lambda x: x,
-    "l2": l2,
-    "sqrt_l2": lambda x: l2(np.sqrt(x)),
-}
+# Deep features are L2-normalized, the same map for every model.
+def deepTransform(x):
+    return l2(x.astype(np.float64))
 
 # Handcrafted baselines: settings selected on validation AP in Part 2.
 BASELINES = [
@@ -50,8 +47,7 @@ def encodingName(layer):
 
 
 def runGrid(categories, baselines, C):
-    configs = [(encodingName(layer), False, fm, lambda x, fm=fm: FEATURE_MAPS[fm](x.astype(np.float64)))
-               for layer in LAYERS for fm in FEATURE_MAPS]
+    configs = [(encodingName(layer), False, "l2", deepTransform) for layer in LAYERS]
     for encoding, spatial, fm in baselines:
         enc_type, _, pca_dim = parseEncoding(encoding)
         configs.append((encoding, spatial, fm,
@@ -81,40 +77,35 @@ def deepEncodingInfo(encoding):
             "device": meta["device"]}
 
 
-def encodingsInfo(baselines, timing_images):
+def encodingsInfo(baselines, out_dir):
+    """Deep encodings from meta.json; handcrafted ones from the Part 2 measurements."""
     info = pd.DataFrame([deepEncodingInfo(encodingName(layer)) for layer in LAYERS])
     if baselines:
-        hand = measureEncodings([b[0] for b in baselines], timing_images)
-        if "sift_ms_per_image" in hand:
-            hand["extract_ms_per_image"] = hand["sift_ms_per_image"] + hand["encode_ms_per_image"]
+        part2 = out_dir / "part2_encodings.csv"
+        if not part2.exists():
+            raise SystemExit(f"Missing {part2}: run `python -m runs.run_part2` first")
+        hand = pd.read_csv(part2).set_index("encoding").loc[[b[0] for b in baselines]].reset_index()
+        hand["extract_ms_per_image"] = hand["sift_ms_per_image"] + hand["encode_ms_per_image"]
         hand["device"] = "cpu"
         info = pd.concat([info, hand[[c for c in info.columns if c in hand]]], ignore_index=True)
     return info
 
 
 def summarize(grid, info):
-    """Print test AP per setting and the feature map selected per encoding; returns the selection."""
+    """Print test AP per encoding, then its costs."""
     pd.set_option("display.width", 200)
     pd.set_option("display.max_columns", 30)
 
-    print("\n=== Test AP per encoding / feature map ===")
-    table = grid.pivot_table(index=["encoding", "feature_map"], columns="category",
-                             values="ap_test", sort=False)
+    print("\n=== Test AP per encoding ===")
+    table = grid.pivot_table(index="encoding", columns="category", values="ap_test", sort=False)
     table["mAP"] = table.mean(axis=1)
     print(table.round(3).to_string())
 
-    # One feature map per encoding, chosen on mean val AP over the categories.
-    mean_val = grid.groupby(["encoding", "feature_map"], sort=False)["ap_val"].mean()
-    best = mean_val.groupby(level="encoding", sort=False).idxmax().tolist()
-    selected = table.loc[best].droplevel("feature_map")
-    costs = (grid.set_index(["encoding", "feature_map"]).loc[best]
-             .groupby(level="encoding", sort=False)[["train_time_s", "infer_ms_per_image"]].mean())
-    print("\n=== Selected feature map per encoding (on mean val AP) ===")
+    print("\n=== Costs per encoding ===")
+    costs = grid.groupby("encoding", sort=False)[["train_time_s", "infer_ms_per_image"]].mean()
     summary = info.set_index("encoding").join(costs)
-    summary.insert(0, "feature_map", dict(best))
-    summary["mAP"] = selected["mAP"]
+    summary["mAP"] = table["mAP"]
     print(summary.round(3).to_string())
-    return best
 
 
 def parseArgs():
@@ -122,8 +113,6 @@ def parseArgs():
     parser.add_argument("--categories", nargs="+", default=CATEGORIES)
     parser.add_argument("--C", type=float, default=10.0, help="SVM C (fixed, as in Part 1)")
     parser.add_argument("--no-baselines", action="store_true", help="Skip BoVW / VLAD / FV")
-    parser.add_argument("--timing-images", type=int, default=5,
-                        help="Images used to time SIFT + encoding of the baselines; 0 disables")
     parser.add_argument("--out", default="results")
     return parser.parse_args()
 
@@ -138,7 +127,7 @@ if __name__ == "__main__":
         raise SystemExit(f"Missing {', '.join(missing)}: run `python -m src.extract_deep -m resnet18` first")
     baselines = [] if args.no_baselines else [b for b in BASELINES if (ENCODINGS_DIR / b[0]).is_dir()]
 
-    info = encodingsInfo(baselines, args.timing_images)
+    info = encodingsInfo(baselines, out_dir)
     info.to_csv(out_dir / "part4_resnet_encodings.csv", index=False)
 
     grid = runGrid(args.categories, baselines, args.C)

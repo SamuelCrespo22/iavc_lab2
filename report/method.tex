@@ -1,27 +1,17 @@
-% ---------------------------------------------------------------------------
-% Secção 2 — Protocolo e métodos. Requer \usepackage{booktabs}.
-% ---------------------------------------------------------------------------
-\section{Protocolo e métodos}
+\section{Métodos}
 \label{sec:method}
 
 \paragraph{Dados e splits.}
-O enunciado fornece dois splits, train e val. O val fornecido passa a ser o
-nosso \emph{test*}, usado só para o resultado final. Do train fornecido
-separámos 20\,\% para validação, por imagem e não por ficheiro de categoria,
-porque há imagens com várias categorias (p.\,ex.\ horse + person). A
-separação é estratificada pela categoria mais rara de cada imagem, com
-seed~42. Ficam 1978 / 494 / 2474 imagens em train / val / test; os números
-por categoria estão na Tab.~\ref{tab:splits}. Cada categoria é uma tarefa
-binária: as imagens que a contêm são positivos e as imagens de background
-são negativos. Todos os métodos leem as mesmas listas, com as mesmas imagens,
-pela mesma ordem e com as mesmas labels.
+O conjunto tem 4946 imagens de cinco categorias e de background. O val fornecido é o nosso test. Do train fornecido separámos 20\,\% para validação, por imagem (há imagens com várias categorias), com estratificação pela categoria mais rara e seed~42 (Tab.~\ref{tab:splits}). Cada categoria é uma
+tarefa binária, com os seus positivos contra o background. As outras categorias ficam fora do treino e do ranking. Esta escolha segue a Stage~B e não é one-vs-rest. Todos os métodos usam as mesmas listas e labels.
 
 \begin{table}[t]
 \centering
-\caption{Número de imagens por categoria e split (uma imagem pode contar em
-várias categorias).}
+\caption{Imagens por categoria e split. A última linha é a prevalência no
+test, ou seja, o AP de um ranking aleatório (mAP 0.209).}
 \label{tab:splits}
 \small
+\setlength\tabcolsep{4pt}
 \begin{tabular}{lrrrrrr}
 \toprule
  & aero & mbike & person & horse & car & backgr. \\
@@ -29,64 +19,25 @@ várias categorias).}
 train & 90  & 96  & 821 & 111 & 298 & 815  \\
 val   & 22  & 24  & 204 & 28  & 78  & 204  \\
 test  & 126 & 125 & 983 & 148 & 337 & 1077 \\
+\midrule
+prev.\ & .105 & .104 & .477 & .121 & .238 & -- \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \paragraph{Features handcrafted.}
-As imagens são convertidas para cinzento e redimensionadas para uma altura
-máxima de 480\,px. O dense SIFT (\texttt{vl\_phow}, passo 4\,px, bins de
-4/6/8/10\,px) dá descritores de 128-d. Os vocabulários (k-means, BoVW) e os
-GMM (FV, covariância diagonal) são ajustados só com descritores amostrados
-das imagens de treino. Para VLAD e FV, os descritores são primeiro reduzidos
-a 80-d por PCA. Usamos os encoders fornecidos (BoVW $K{=}512$; VLAD e FV
-$K{=}32$) e treinámos os restantes $K$ com o mesmo código. Cada imagem é
-codificada em tiles $2\times2$, concatenados; a variante \emph{global} soma
-os quatro tiles. Os mapas de features comparados são:
-\begin{itemize}
-\item BoVW: nenhum, L1, L2 e Hellinger ($\sqrt{\cdot}$ seguido de L2);
-\item VLAD/FV: L2, \emph{signed square root} + L2 (SSR) e intra-normalização
-por palavra (só VLAD).
-\end{itemize}
+As imagens passam a cinzento com altura máxima de 480\,px. O dense SIFT (\texttt{vl\_phow}, passo 4\,px, bins 4--10\,px) é reduzido a 80-d por PCA para VLAD e FV. Os vocabulários e os GMM (covariância diagonal) são ajustados só com imagens de treino (733 imagens, até 400 descritores cada). Cada imagem
+é codificada em tiles $2\times2$ concatenados. A variante global soma os tiles, o que só é exato no BoVW. Comparamos nenhuma normalização, L1, L2 e Hellinger no BoVW, e nenhuma, L2, \emph{signed square root} e intra-normalização (só VLAD) na VLAD e no FV.
 
 \paragraph{Features profundas.}
-Os modelos estão congelados: ResNet-18 e ViT-B/32 com pesos torchvision \texttt{IMAGENET1K\_V1}, DINOv2 ViT-S/14 do \texttt{torch.hub} (\texttt{facebookresearch/dinov2}) e CLIP ViT-B/32 do repositório \texttt{openai/CLIP}. Usamos o pré-processamento oficial de cada modelo: resize para 256 e crop de 224 na ResNet-18, no ViT-B/32 e no DINOv2, e o \texttt{preprocess} próprio do CLIP (224, bicúbico). As features são o pooling de \texttt{layer2}--\texttt{4} da ResNet, o token de classe do ViT, o CLS ou a média dos patches do DINOv2 e o embedding de imagem do CLIP, todos normalizados em L2 (escolhido na validação). O few-shot e o estudo de $C$ usam o CLS do DINOv2.
+Usamos o pré-processamento oficial de cada modelo: resize para 256 e crop de 224 na ResNet-18, no ViT-B/32 (torchvision \texttt{IMAGENET1K\_V1}) e no DINOv2 ViT-S/14, e o \texttt{preprocess} próprio do CLIP ViT-B/32 (224, bicúbico). As features são o pooling de \texttt{layer2}--\texttt{4} da ResNet, o token de classe do ViT, o CLS ou a média dos patches do DINOv2 e o embedding de imagem do CLIP, todos normalizados em L2 (escolhido na validação). O few-shot e o estudo de $C$ usam o CLS do DINOv2.
 
-\paragraph{Classificador e seleção.}
-Para cada categoria treinamos um SVM linear (\texttt{LinearSVC}, hinge loss,
-dual, $\texttt{max\_iter}=100$, $\texttt{tol}=10^{-3}$) contra o background,
-com $C=10$ fixo. A Stage~D da Parte~4 estuda $C$ à parte. Todas as escolhas
-(normalização, layout, $K$, layer, prompts, $C$) são feitas pelo mAP de
-validação. O test é avaliado uma única vez, com a configuração escolhida. A
-única exceção é a Parte~3, que reporta todas as condições porque o enunciado
-o pede e não há seleção.
+\paragraph{Classificadores e seleção.}
+Usamos um \texttt{LinearSVC} por categoria ($C=10$, $\texttt{max\_iter}=100$, como no código fornecido). Com este limite, o BoVW-Hellinger, o FV em aeroplane e quase todos os SVMs sobre features profundas não convergem. Nestas últimas, convergir (até 20\,000 iterações) muda o mAP de test no máximo 0.0006. O CLIP zero-shot ordena cada categoria pela similaridade de cosseno ao seu prompt. As escolhas são feitas pelo mAP de validação, e o test é avaliado uma vez. As exceções são a Parte~3, que reporta todas as condições, e a Stage~D da Parte~4, que escolhe $C$ para 5 positivos e para todos os positivos.
 
 \paragraph{Métricas.}
-O AP é calculado com \texttt{average\_precision\_score} do scikit-learn (soma
-da precisão em cada aumento de recall, sem interpolação) sobre o ranking pelo
-score contínuo do SVM. A classe positiva é a categoria e os negativos são o
-background. O mAP é a média dos 5 AP, e um ranking aleatório tem AP igual à
-prevalência. Também reportamos P@K e R@K, e precisão e recall no threshold~0
-do SVM. Nas matrizes de confusão, cada imagem vai para a categoria com o
-maior score de SVM, ou para background se todos os scores forem negativos.
-As imagens com mais de uma categoria ficam de fora destas matrizes. Na
-Parte~3 reportamos também accuracy e macro-F1 no threshold~0.
+O AP é o do scikit-learn (sem interpolação), calculado sobre o score contínuo. O mAP é a média das 5 categorias. Reportamos também precisão e recall no threshold~0 e, na Parte~5, P@K e R@K. Nas matrizes de confusão vence o maior score (background se todos forem negativos; no zero-shot, o argmax entre 6 prompts), e excluímos as imagens com várias categorias (restam 2169 no test).
 
-\paragraph{Seeds, hardware e custos.}
-A seed é 42 em todos os splits, amostragens e SVMs. A Parte~3 repete cada
-condição com 3 seeds (subamostras estratificadas de 90\,\% do treino), e o
-few-shot com 5 sorteios de positivos; reportamos média $\pm$ desvio padrão.
-Tudo correu num CPU AMD (família 25, modelo 80), sem GPU, com Python 3.11.9,
-NumPy 2.4.6, scikit-learn 1.9.1, PyTorch 2.14.0, torchvision 0.29.0 e
-cyvlfeat 0.7.1. Os custos foram medidos assim:
-\begin{itemize}
-\item extração profunda: tempo por imagem sobre as 4946 imagens, incluindo
-o carregamento do modelo, a leitura do JPEG e o pré-processamento;
-\item extração handcrafted (SIFT + encoding): medida em 5 imagens, por isso
-os tempos dos dois tipos são só comparáveis em ordem de grandeza;
-\item inferência: mapa de features + SVM por imagem, com as features já
-extraídas;
-\item armazenamento: dimensão $\times$ 4\,B (float32).
-\end{itemize}
-O código e os scripts que reproduzem cada tabela e figura
-(\texttt{runs/run\_part*.py}) estão no repositório.
+\paragraph{Repetições, hardware e custos.}
+Reportamos média $\pm$ desvio padrão com 5 seeds na Stage~G, 3 na Parte~3 e 5 sorteios no few-shot. Tudo correu num Ryzen~5 5500, sem GPU, em Windows (Python 3.11.9, scikit-learn 1.9.1, PyTorch 2.14.0, cyvlfeat 0.7.1). A extração profunda inclui o carregamento do modelo e o pré-processamento. A handcrafted foi medida em 5 imagens, por isso só se compara em ordem de
+grandeza. O armazenamento é dimensão $\times$ 4\,B. Os scripts estão em \texttt{runs/}.

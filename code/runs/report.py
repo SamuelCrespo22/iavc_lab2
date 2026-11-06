@@ -334,9 +334,7 @@ def reportPart2(results):
     table = test[["mAP"]].join(info).join(costs)
     lines += ["Comparison of the three encodings (selected settings). Codebook fit = PCA + k-means / GMM, once; "
               "SIFT and encoding time per image on 5 test images (CPU); storage as stored on disk; SVM training "
-              "and inference (per test image) averaged over the categories:", "", md(table), "",
-              "Precision–recall curves and P@K of BoVW, VLAD K = 32 and FV K = 32 are in the Part 4 report "
-              "(`part4_pr_curves.png`, ranking table).", ""]
+              "and inference (per test image) averaged over the categories:", "", md(table), ""]
     return lines
 
 
@@ -431,24 +429,19 @@ def reportPart3(results):
 
 
 def deepSection(results, name, title, asked, command):
-    """Validation mAP of every feature map, then test AP and costs of the selected one."""
+    """Test AP per encoding, with validation mAP, dimension and costs."""
     lines = [f"## {title}", ""] + note(asked)
     grid, info = read(results, f"{name}_grid.csv"), read(results, f"{name}_encodings.csv")
     if grid is None or info is None:
         return lines + pending(title, command)
 
-    val = grid.pivot_table(index="encoding", columns="feature_map", values="ap_val", sort=False)
-    selected = selectOnVal(grid, ["feature_map"])
-    val["selected"] = selected.groupby("encoding", sort=False)["feature_map"].first()
-    lines += ["Validation mAP per feature map. The map with the highest validation mAP is selected:", "",
-              md(fmt(val)), ""]
-
-    test = withMAP(selected.pivot_table(index="encoding", columns="category", values="ap_test", sort=False))
-    infer_us = 1000 * selected.groupby("encoding", sort=False)["infer_ms_per_image"].mean()
-    table = (test.join(info.set_index("encoding")[["dim", "extract_ms_per_image"]])
-             .join(infer_us.rename("infer_us_per_image")))
-    lines += ["Test AP of the selected setting, with feature dimension, extraction time and inference cost "
-              "per image:", "", md(table), ""]
+    test = withMAP(grid.pivot_table(index="encoding", columns="category", values="ap_test", sort=False))
+    per_encoding = grid.groupby("encoding", sort=False)
+    table = (test.join(per_encoding["ap_val"].mean().rename("mAP_val"))
+             .join(info.set_index("encoding")[["dim", "extract_ms_per_image"]])
+             .join((1000 * per_encoding["infer_ms_per_image"].mean()).rename("infer_us_per_image")))
+    lines += ["Test AP per category and mAP, validation mAP, feature dimension, extraction time and inference "
+              "cost per image:", "", md(table), ""]
     return lines
 
 
@@ -458,8 +451,9 @@ def reportPart4(results):
               "- Splits: every method reads the same `data/splits_protocol` lists (train / validation = 80 / 20 "
               "of the supplied train files, test = the supplied val files): the same images, in the same order, "
               "with the same labels; no image is in two subsets.",
-              "- Selection: every choice (feature map, C, prompt set) is made on validation AP; the test set only "
-              "reports the chosen setting. C = 10 and the L2 map are fixed in advance where nothing is chosen.",
+              "- Selection: deep features are L2-normalized and the SVM uses C = 10, both fixed in advance; the "
+              "choices of Stages D and E (C, prompt set) are made on validation AP and the test set only reports "
+              "the chosen setting.",
               "- Costs: feature dimension and extraction time per image are stored by `src.extract_deep` in "
               "`meta.json` (forward pass on CPU over all 4946 images, original + flip, including model loading, "
               "JPEG decoding and preprocessing). Inference = feature map + linear SVM per test image, features "
@@ -470,16 +464,16 @@ def reportPart4(results):
               f"- Environment: {environment()}.", ""]
 
     lines += deepSection(results, "part4_resnet", "Stage A — frozen CNN features (ResNet-18)",
-                         "Global average pooling of each of the 3 last ResNet-18 stages, linear SVM on the frozen "
-                         "features, compared with the BoVW / VLAD / FV settings selected in Part 2.",
+                         "Global average pooling of each of the 3 last ResNet-18 stages, L2, linear SVM on the "
+                         "frozen features, compared with the BoVW / VLAD / FV settings selected in Part 2 (their "
+                         "costs as measured in Part 2).",
                          "python -m runs.run_part4_resnet")
 
     lines += deepSection(results, "part4_dino", "Stage B — DINOv2 ViT-S/14",
                          "Frozen DINOv2 global embedding (CLS token) + linear SVM: per-class AP, mAP, confusion "
                          "matrix, dimension, extraction and inference cost. Optional extension: the mean of the "
-                         "patch tokens (`patchmean`). ResNet-18 layer4, the ViT-B/32 class token (the \"CNN/ViT\" "
-                         "row of the final table; signed features, so no square root) and CLIP are shown for "
-                         "reference.",
+                         "patch tokens (`patchmean`). The ViT-B/32 class token (the \"CNN/ViT\" row of the final "
+                         "table) and CLIP are shown for reference.",
                          "python -m runs.run_part4_dino")
     for csv in sorted(results.glob("part4_dino_confusion_dinov2_*.csv")):
         cm = pd.read_csv(csv, index_col=0)
@@ -598,10 +592,7 @@ METHODS = [("BoVW + SVM", "bovw", "Task labels"),
 
 
 def finalSelection(results):
-    """Per SVM method of the comparison table, the encoding and feature map with the best validation mAP.
-
-    Also used by runs.run_part4_ranking, so both report the same representations.
-    """
+    """Per SVM method of the comparison table, the encoding with the best validation mAP."""
     selected = []
     for name in ["part4_resnet", "part4_dino"]:
         grid, info = read(results, f"{name}_grid.csv"), read(results, f"{name}_encodings.csv")
@@ -613,7 +604,6 @@ def finalSelection(results):
     if not selected:
         return None
     selected = pd.concat(selected)
-    selected = selected[~selected.index.duplicated()]  # ResNet layer4 is in both grids
 
     rows = []
     for method, prefix, supervision in METHODS:
@@ -627,11 +617,11 @@ def finalSelection(results):
 
 def comparisonSection(results):
     lines = ["## Required comparison table", ""]
-    lines += note("One row per method. Within a method, the representation (layer or token, feature map) with "
-                  "the highest validation mAP. Every SVM uses C = 10, fixed in advance as in Part 1 (Stage D "
-                  "studies C separately). Extraction: deep models = forward pass on CPU (see the protocol above); "
-                  "handcrafted = dense SIFT + encoding on CPU, timed on 5 images. Inference: feature map + "
-                  "classifier (or text similarity) per image, features already extracted.")
+    lines += note("One row per method. Within a method, the representation (layer or token) with the highest "
+                  "validation mAP. Every SVM uses C = 10, fixed in advance as in Part 1 (Stage D studies C "
+                  "separately). Extraction: deep models = forward pass on CPU (see the protocol above); "
+                  "handcrafted = dense SIFT + encoding on CPU, timed on 5 images in Part 2. Inference: feature "
+                  "map + classifier (or text similarity) per image, features already extracted.")
     selection = finalSelection(results)
     if selection is None:
         return lines + pending("comparison table", "the Part 4 scripts")
@@ -651,22 +641,6 @@ def comparisonSection(results):
             "extract_ms_per_image": costs["extract_ms_per_image"].iloc[0],
             "infer_us_per_image": costs["infer_us_per_image"].iloc[0]}
     lines += [md(table.rename_axis("method")), ""]
-    lines += rankingSection(results)
-    return lines
-
-
-def rankingSection(results):
-    lines = ["### Ranking metrics of the same methods", ""]
-    ranking = read(results, "part4_ranking.csv")
-    if ranking is None:
-        return lines + pending("ranking metrics", "python -m runs.run_part4_ranking")
-    lines += ["Test set, mean over the 5 categories. Positive class: the category; negatives: background. "
-              "AP = scikit-learn `average_precision_score` (sum over the ranking of precision × recall step, "
-              "no interpolation). P@K / R@K: precision / recall of the top K images. `precision_thr0` / "
-              "`recall_thr0`: classification at the SVM threshold 0 (none for zero-shot, which has no "
-              "threshold). Per-category values are in `part4_ranking.csv`.", "",
-              md(fmt(ranking.drop(columns="category").groupby("method", sort=False).mean())), "",
-              "![part4_pr_curves](part4_pr_curves.png)", ""]
     return lines
 
 

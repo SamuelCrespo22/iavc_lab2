@@ -1,42 +1,14 @@
-"""Part 3 experiments: large visual vocabulary + PCA vs. a directly smaller vocabulary.
+"""Part 3: large codebook + PCA vs. a directly smaller codebook.
 
-Question: is it better to build a rich representation with a large codebook and
-compress it with PCA, or to use a small codebook directly?
+BoVW (global histogram, Hellinger), VLAD and FV (2x2 tiles, signed sqrt + L2),
+each without PCA and with PCA to every d in --pca-dims (d < dim, d <= n_train - 1).
+PCA is fitted on the training images only and its output is L2 re-normalized.
+Linear SVM per category as in Part 1. Each seed trains on a different stratified
+subset of the training set (PCA refitted); val and test are always complete.
+Conditions A-D of the assignment are taken from the BoVW rows (conditionsTable).
 
-Representations (same protocol and linear SVM as Part 1: one classifier per
-category, positives vs. background, C fixed):
-
-  BoVW  global histogram (2x2 tiles summed), Hellinger map      dim = K
-  VLAD  2x2 tiles, signed sqrt + L2                             dim = 4 * K * C
-  FV    2x2 tiles, signed sqrt + L2 ("improved" FV)             dim = 4 * (2*K*C + K)
-
-VLAD/FV stay tiled: their stored tiles are encoded (and VLAD normalized) per
-tile, so, unlike BoVW counts, they cannot be merged into an exact global vector.
-
-Each representation is evaluated without PCA and with PCA to every d in
---pca-dims such that d < dim and d <= n_train - 1. PCA is fitted on the training
-images only and its output is L2 re-normalized.
-
-Conditions of the assignment table (BoVW):
-  A  small K, no PCA          (--small-k, default 256)
-  B  large K, no PCA          (--large-k, default 1024)
-  C  large K + PCA to d
-  D  K = d, no PCA            (same final dimension as C)
-VLAD/FV have no condition D: their smallest raw dimension is far above any d.
-For them, the same-dimension comparison is a larger K + PCA vs. a smaller K +
-PCA to the same d (part3_matched.csv).
-
-Stability: each seed trains on a different stratified subset (--subsample) of
-the training set and refits PCA on it; validation and test sets are always
-complete. The codebooks themselves are fixed (one k-means/GMM per K).
-
-Outputs (in --out):
-  part3_grid.csv         one row per (encoding, d, category, seed)
-  part3_summary.csv      per (encoding, d): mAP mean/std over seeds + costs   (Q2, Q4, Q5)
-  part3_conditions.csv   the A/B/C/D rows of the summary                      (Q3)
-  part3_matched.csv      test mAP per (type, final dimension) x codebook K    (Q3, Q5)
-  part3_per_class.csv    test AP per category, no PCA                         (Q1)
-  part3_map_vs_dim.png   test mAP vs. final dimension, one line per K         (Q1-Q3, Q5)
+Outputs: part3_grid.csv, part3_summary.csv, part3_conditions.csv,
+part3_per_class.csv, part3_map_vs_dim.png. Tables: python -m runs.report --parts 3
 
 Usage:
     python -m runs.run_part3
@@ -53,7 +25,7 @@ import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 
-from runs.run_part1 import CATEGORIES, NUM_TILES, l2, loadData, stratifiedSubset, trainAndEvaluate
+from runs.run_part1 import CATEGORIES, l2, loadData, removeSpatialInformation, stratifiedSubset, trainAndEvaluate
 from runs.run_part2 import ENCODINGS_DIR, measureEncodings, parseEncoding, signedSqrt
 
 DEFAULT_ENCODINGS = [
@@ -62,19 +34,9 @@ DEFAULT_ENCODINGS = [
     "fv_K16_C80", "fv_K32_C80", "fv_K64_C80",
 ]
 
-
-def globalHistogram(x):
-    """(N, 4*K) tiled BoVW counts -> (N, K) whole-image counts.
-
-    The stored vector is [tile 0 | tile 1 | tile 2 | tile 3]; every keypoint lies
-    in exactly one tile, so the sum over tiles is the global histogram.
-    """
-    return x.reshape(len(x), NUM_TILES, -1).sum(axis=1)
-
-
 # Representation fed to the SVM (and to PCA), per encoding type.
 FEATURES = {
-    "bovw": lambda x: l2(np.sqrt(globalHistogram(x))),  # Hellinger
+    "bovw": lambda x: l2(np.sqrt(removeSpatialInformation(x))),  # Hellinger
     "vlad": lambda x: l2(signedSqrt(x)),
     "fv": lambda x: l2(signedSqrt(x)),
 }
@@ -136,7 +98,7 @@ def summarize(grid, costs):
 
 
 def conditionsTable(summary, small_k, large_k):
-    """Rows A/B/C/D of the assignment table, taken from the BoVW summary."""
+    """Rows of the assignment table (BoVW). A: small K; B: large K; C: large K + PCA to d; D: K = d."""
     bovw = summary[summary["type"] == "bovw"]
     no_pca = bovw[bovw["pca_dim"] == 0]
     parts = [no_pca[no_pca["K"] == small_k].assign(condition="A"),
@@ -148,16 +110,6 @@ def conditionsTable(summary, small_k, large_k):
     return table[["condition", "encoding", "pca_dim", "dim", "mAP_val", "mAP_test", "mAP_test_std",
                   "acc_test", "f1_test", "codebook_fit_s", "encode_ms_per_image",
                   "pca_fit_s", "svm_train_s", "infer_us", "kb_per_image"]]
-
-
-def matchedTable(summary):
-    """Test mAP: rows = (type, final dimension), columns = codebook K.
-
-    Each row compares codebooks at the same final dimension. For BoVW the
-    diagonal (K = d) is the codebook used directly and the cells to its right
-    are larger codebooks compressed with PCA to d.
-    """
-    return summary.pivot_table(index=["type", "dim"], columns="K", values="mAP_test")
 
 
 def plotMapVsDim(summary, path):
@@ -207,14 +159,9 @@ if __name__ == "__main__":
     args = parseArgs()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    pd.set_option("display.width", 220)
-    pd.set_option("display.max_columns", 30)
 
     encodings = [e for e in args.encodings if (ENCODINGS_DIR / e).is_dir()]
-    missing = [e for e in args.encodings if e not in encodings]
-    print("Encodings:", ", ".join(encodings))
-    if missing:
-        print("Missing (skipped):", ", ".join(missing))
+    print("Encodings:", ", ".join(encodings), "| missing:", ", ".join(set(args.encodings) - set(encodings)) or "-")
 
     # Per-encoder costs: codebook fitting (from the encoder .npz), SIFT and encoding per image.
     costs = measureEncodings(encodings, args.timing_images).reindex(
@@ -222,24 +169,10 @@ if __name__ == "__main__":
 
     grid = runGrid(encodings, args.categories, args.pca_dims, args.seeds, args.subsample, args.C)
     summary = summarize(grid, costs)
-    conditions = conditionsTable(summary, args.small_k, args.large_k)
-    matched = matchedTable(summary)
-    per_class = grid[grid["pca_dim"] == 0].pivot_table(
-        index="encoding", columns="category", values="ap_test", sort=False)
-
     grid.to_csv(out / "part3_grid.csv", index=False)
     summary.to_csv(out / "part3_summary.csv", index=False)
-    conditions.to_csv(out / "part3_conditions.csv", index=False)
-    matched.to_csv(out / "part3_matched.csv")
-    per_class.to_csv(out / "part3_per_class.csv")
+    conditionsTable(summary, args.small_k, args.large_k).to_csv(out / "part3_conditions.csv", index=False)
+    grid[grid["pca_dim"] == 0].pivot_table(index="encoding", columns="category", values="ap_test",
+                                           sort=False).to_csv(out / "part3_per_class.csv")
     plotMapVsDim(summary, out / "part3_map_vs_dim.png")
-
-    print("\n=== Q1: test AP per category, no PCA ===")
-    print(per_class.round(3).to_string())
-    print("\n=== Q2/Q4/Q5: every representation and PCA dimension (0 = no PCA) ===")
-    print(summary.drop(columns=["type", "K"]).round(3).to_string(index=False))
-    print(f"\n=== Q3: assignment conditions (A: K={args.small_k}, B/C: K={args.large_k}) ===")
-    print(conditions.round(3).to_string(index=False))
-    print("\n=== Q3/Q5: test mAP at the same final dimension (rows) per codebook K (cols) ===")
-    print(matched.round(3).to_string())
-    print(f"\nResults written to {out.resolve()}")
+    print(f"Results written to {out.resolve()}; tables: python -m runs.report --parts 3")
