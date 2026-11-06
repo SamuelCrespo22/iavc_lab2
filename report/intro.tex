@@ -1,0 +1,75 @@
+% ---------------------------------------------------------------------------
+% Introdução — labels usados: sec:method, sec:part1, sec:part2, sec:part3,
+% sec:part4, sec:part5, sec:comparison, sec:conclusion (pôr \label{} iguais
+% nas respetivas secções).
+% ---------------------------------------------------------------------------
+\section{Introdução}
+\label{sec:intro}
+
+A classificação de imagens atribui a cada imagem uma ou mais categorias
+semânticas. O \emph{retrieval} ordena uma coleção pela probabilidade de cada
+imagem conter uma categoria ou corresponder a uma query. As duas tarefas
+dependem da mesma escolha: a representação que transforma uma imagem num
+vetor de dimensão fixa, comparável por produtos internos. Este trabalho
+compara representações de três gerações num protocolo comum. Para cada uma
+medimos a qualidade (AP/mAP), a eficiência em labels, a robustez e o custo
+computacional e de armazenamento.
+
+\paragraph{Representações handcrafted.}
+O ponto de partida são descritores SIFT \cite{lowe2004} calculados numa grelha
+densa. O \emph{Bag of Visual Words} (BoVW) \cite{sivic2003,csurka2004}
+quantiza cada descritor na palavra mais próxima de um vocabulário aprendido
+por k-means e representa a imagem pelo histograma das palavras (dimensão
+$K$). A pirâmide espacial \cite{lazebnik2006} concatena histogramas de
+regiões e recupera parte do layout que o histograma global perde. Sobre
+estes vetores treina-se um SVM linear \cite{cortes1995}, que pode aproximar
+o kernel de Hellinger através de um mapa explícito (raiz quadrada + L2)
+\cite{vedaldi2012}. A VLAD \cite{jegou2010} guarda, por palavra, a soma dos
+resíduos dos descritores ao centro (estatística de 1.ª ordem, dimensão
+$K\times D$). O Fisher Vector \cite{perronnin2010} usa um GMM com atribuição
+suave e guarda também as variâncias (2.ª ordem, $2K\times D$). Com isto
+ganha-se informação por palavra, à custa de vetores muito maiores, e por
+isso faz sentido perguntar se um vocabulário grande comprimido por PCA vale
+mais do que um vocabulário pequeno.
+
+\paragraph{Representações aprendidas.}
+As redes pré-treinadas substituem o descritor fixo por uma hierarquia
+aprendida. Avaliamos três tipos de pré-treino, todos com o backbone
+congelado e um SVM linear por cima:
+\begin{itemize}
+\item supervisionado no ImageNet: ResNet-18 \cite{he2016resnet} e ViT-B/32
+\cite{dosovitskiy2021vit};
+\item auto-supervisionado, sem labels: DINOv2 \cite{oquab2024dinov2};
+\item alinhamento imagem--texto: CLIP \cite{radford2021clip}, que permite
+classificar e pesquisar por texto sem nenhum exemplo rotulado
+(\emph{zero-shot}).
+\end{itemize}
+
+\paragraph{Dados e avaliação.}
+Usamos o conjunto fornecido: 4946 imagens de cinco categorias (aeroplane,
+motorbike, person, horse, car) e imagens de background sem nenhuma delas.
+Cada categoria é uma tarefa binária, com as suas imagens como positivos e o
+background como negativos. Avaliamos por retrieval: ordenamos pelo score do
+classificador e calculamos AP, mAP e P@K, complementados por matrizes de
+confusão. Todas as escolhas são feitas na validação, e o test é usado uma
+única vez (Sec.~\ref{sec:method}).
+
+\paragraph{Organização e principais resultados.}
+\begin{itemize}
+\item \textbf{BoVW (Sec.~\ref{sec:part1}).} Estudamos a normalização, a
+informação espacial, o kernel de Hellinger e o efeito do número de imagens
+de treino.
+\item \textbf{VLAD e FV (Sec.~\ref{sec:part2}).} Sobem o mAP de 0.694 (BoVW)
+para 0.746 e 0.784.
+\item \textbf{Vocabulário e PCA (Sec.~\ref{sec:part3}).} À mesma dimensão
+final, um vocabulário grande comprimido por PCA supera um vocabulário
+pequeno, mas o PCA não reduz o custo de extração.
+\item \textbf{Modelos pré-treinados (Sec.~\ref{sec:part4}).} Fecham quase
+todo o resto do intervalo: ResNet-18 0.964, DINOv2 0.984, e um único
+exemplo positivo com DINOv2 já supera o BoVW treinado com todos. O CLIP
+\emph{zero-shot} atinge 0.826 sem nenhuma label de treino.
+\item \textbf{Retrieval por query (Sec.~\ref{sec:part5}).} Comparamos
+queries por imagem e por texto.
+\end{itemize}
+A Sec.~\ref{sec:comparison} reúne os métodos numa tabela comum e discute
+custos e limitações. A Sec.~\ref{sec:conclusion} conclui.
