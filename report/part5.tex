@@ -15,25 +15,22 @@ query é o cosseno a todo o corpus mais a ordenação.
 \begin{table}[h]
 \centering
 \caption{Retrieval de \emph{horse}: média sobre 12 queries (CLIP texto: uma
-query). Extração em CPU por imagem; corpus em float32.}
+query). O R@20 máximo é $20/148=0.135$. Extração em CPU, medida como na
+Parte~4; corpus em float32.}
 \label{tab:part5}
 \small
 \setlength{\tabcolsep}{3pt}
 \resizebox{\linewidth}{!}{%
-\begin{tabular}{lrrrrrrrr}
+\begin{tabular}{lrrrrrrrrr}
 \toprule
-Método & mAP & P@5 & P@10 & P@20 & $d$ & Extr.\ (ms) & Corpus (MB) & Query (ms) \\
+Método & mAP & P@5 & P@10 & P@20 & R@20 & $d$ & Extr.\ (ms) & Corpus (MB) & Query (ms) \\
 \midrule
-BoVW $K{=}512$       & .105 & .20 & .22 & .16 &  2048 & 221 &  19.3 &  1.32 \\
-VLAD $K{=}32$        & .119 & .20 & .17 & .18 & 10240 & 161 &  96.6 &  7.79 \\
-FV $K{=}32$          & .083 & .12 & .09 & .13 & 20608 & 203 & 194.5 & 16.56 \\
+BoVW $K{=}512$       & .105 & .20 & .22 & .16 & .022 &  2048 & 254 & 19.3 & 1.33 \\
+VLAD $K{=}32$        & .119 & .20 & .17 & .18 & .024 & 10240 & 224 & 96.6 & 8.73 \\
 \midrule
-ResNet-18 layer4     & .517 & .73 & .75 & .71 &   512 &  18 &   4.8 &  0.18 \\
-ViT-B/32             & .592 & .72 & .74 & .77 &   768 &  35 &   7.2 &  0.20 \\
-DINOv2 CLS           & \textbf{.806} & .98 & .98 & .96 & 384 & 52 & 3.6 & 0.15 \\
-DINOv2 média patches & .757 & .95 & .93 & .88 &   384 &  52 &   3.6 &  0.15 \\
-CLIP imagem          & .648 & .97 & .97 & .92 &   512 &  35 &   4.8 &  0.16 \\
-CLIP texto           & .803 & 1.00 & 1.00 & .95 &  512 &  35 &   4.8 &  0.17 \\
+ResNet-18 layer4     & .517 & .73 & .75 & .71 & .096 &   512 &  18 &  4.8 & 0.17 \\
+DINOv2 CLS           & \textbf{.806} & .98 & .98 & .96 & .130 & 384 & 52 & 3.6 & 0.16 \\
+CLIP texto           & .803 & 1.00 & 1.00 & .95 & .128 &  512 &  35 &  4.8 & 0.23 \\
 \bottomrule
 \end{tabular}}
 \end{table}
@@ -41,46 +38,44 @@ CLIP texto           & .803 & 1.00 & 1.00 & .95 &  512 &  35 &   4.8 &  0.17 \\
 \begin{figure*}[h]
 \centering
 \includegraphics[width=\linewidth]{figures/part5_ranked_hard.png}
-\caption{Top-8 para a query mais difícil (pónei sem cavaleiro). Verde: relevante;
-vermelho: irrelevante.}
+\caption{Top-8 para a query mais difícil (cavalo visto da sela, num campo). Verde:
+relevante; vermelho: irrelevante.}
 \label{fig:part5}
 \end{figure*}
 
 \paragraph{Melhor estratégia.}
 O DINOv2 CLS (mAP 0.806, P@10 0.98) e o CLIP texto com ``a photo of a
 horse.'' (AP 0.803, P@10 1.00) são os melhores (Tab.~\ref{tab:part5}). Na query
-mais difícil (Fig.~\ref{fig:part5}), o DINOv2 tem 8/8 relevantes no top-8, o
-CLIP imagem 4/8, a ResNet e o ViT 1/8 e os handcrafted 0/8, e os erros são
-vacas, ovelhas e pessoas.
+mais difícil (Fig.~\ref{fig:part5}), o DINOv2 tem 7/8 relevantes no top-8, o
+BoVW 2/8 e a VLAD e a ResNet 1/8. Os handcrafted trazem sobretudo vacas, ovelhas
+e cães, e a ResNet paisagens com pessoas e motas: emparelham o fundo, não o cavalo.
 
 \paragraph{Local vs.\ global.}
-Sem SVM, os descritores locais ficam perto do acaso (mAP 0.08--0.12), e os
-profundos 4--10$\times$ acima. A informação existe, porque com o SVM da Parte~4
-as mesmas features davam 0.66--0.76 de AP em horse. O cosseno pesa todas as
+Sem SVM, os descritores locais ficam perto do acaso (mAP 0.105 e 0.119), e os
+profundos 4--8$\times$ acima. A informação existe, porque com o SVM da Parte~4
+as mesmas features davam 0.66 e 0.74 de AP em horse. O cosseno pesa todas as
 palavras por igual, e o fundo (relva, céu) domina. Os embeddings profundos já
-agrupam por objeto e são também mais baratos: 3.6--7.2\,MB de corpus contra
-19--194\,MB e 0.15--0.20\,ms por query contra 1.3--17\,ms.
+agrupam por objeto e são também mais baratos: 3.6--4.8\,MB de corpus contra
+19--97\,MB e 0.16--0.23\,ms por query contra 1.3--8.7\,ms.
 
 \paragraph{Vocabulário e PCA.}
-No BoVW global com Hellinger, o mAP passa de 0.086 ($K{=}32$) para 0.105
-($K{=}1024$); com L2 até desce (0.085$\to$0.076). O PCA não perde nada e
-comprime muito: BoVW $K{=}1024\to16$ dá 0.104, VLAD$\to128$ dá 0.117 (era 0.119)
-e o FV melhora (0.083$\to$0.123 em $d{=}64$). À mesma dimensão, $K$ grande +
-PCA supera $K$ pequeno, como na Parte~3 ($d{=}32$: 0.106 contra 0.086), mas a
-margem é pequena. O whitening \cite{jegou2012negative} só ajuda com $d$
-pequeno (FV $d{=}32$: 0.134) e piora com $d\ge128$.
+No BoVW global com Hellinger, o mAP passa só de 0.086 ($K{=}32$) para 0.105
+($K{=}1024$), ao contrário da classificação, em que o mesmo aumento de $K$ dava
+0.494$\to$0.681 (Parte~3). O PCA mantém o desempenho com muito menos dimensões: o BoVW
+$2048\to32$ dá 0.105 (igual) e a VLAD $10240\to64$ dá 0.120 (era 0.119). O
+tempo por query cai de 1.3 e 8\,ms para 0.05--0.06\,ms.
 
 \paragraph{Diversidade das queries.}
-O AP varia muito entre queries (desvio 0.13--0.24 nos profundos; DINOv2
-0.52--0.94). As queries com cavaleiro são mais fáceis (DINOv2 0.879 contra
-0.733; CLIP imagem 0.776 contra 0.519), porque 116 dos 148 relevantes têm
-pessoa. A ordem dos métodos também muda: na query difícil o DINOv2 tem 0.80 e o
-CLIP 0.27, e noutra o CLIP tem 0.71 e o DINOv2 0.52. Uma só query não chega para
-comparar métodos.
+O AP varia muito entre queries (desvio 0.13 no DINOv2 e 0.17 na ResNet; DINOv2
+0.52--0.94). As queries com cavaleiro são mais fáceis (DINOv2 0.879 contra 0.733;
+ResNet 0.620 contra 0.414), porque 116 dos 148 relevantes têm pessoa. A distância
+entre métodos também muda: na 006134 o DINOv2 tem 0.80 e a ResNet 0.21, na 006836
+tem 0.76 e a ResNet 0.69. Uma só query não chega para comparar métodos.
 
 \paragraph{Wording no CLIP.}
 O AP vai de 0.718 a 0.888 entre 7 formulações. ``horse'' (0.888) e uma
-descrição do animal (0.883) superam ``a photo of a horse.'' (0.803), e os
+descrição do animal (0.883) superam ``a photo of a horse.'' (0.803), como no
+val da Parte~4 (0.949 contra 0.885), e os
 templates e os sinónimos não mudam nada (0.807, 0.806). Mais detalhe só ajuda
 se descrever o objeto. ``a person riding a horse in a field'' traz paisagens sem
 cavalos (AP 0.718, P@10 0.70). ``a white horse jumping over a fence\dots''
@@ -89,10 +84,12 @@ partilham 1 ou 0 imagens do top-20 com ``photo''.
 
 \paragraph{Limitações de um corpus pequeno.}
 O AP depende da prevalência: com 10\,\% dos irrelevantes (prevalência 0.39), o
-BoVW sobe para 0.484 e o DINOv2 para 0.962, mantendo a ordem. Os hard negatives
-estão no background: sem as outras categorias, o CLIP texto fica em 0.811, e
-sem o background sobe para 0.971. A relevância vem dos labels VOC por imagem,
-por isso cavalos não anotados contam como erro, e com 148 relevantes o R@20
-nunca passa de 0.135. Há 31 pares de quase-duplicados no corpus (15 entre
-relevantes, 2 cópias exatas), que inflacionam o P@K das queries que lhes
-acertam. Com 12 queries, o mAP tem incerteza grande.
+BoVW sobe para 0.484 e o DINOv2 para 0.962, e os locais continuam muito abaixo
+dos profundos. Os hard negatives estão no background: sem as outras categorias,
+o CLIP texto fica em 0.811, e sem o background sobe para 0.971. A relevância vem
+dos labels VOC por imagem, por isso cavalos não anotados contam como erro, e com
+148 relevantes o R@20 nunca passa de 0.135. Os quase-duplicados também
+enviesam: o filtro das queries (cosseno DINOv2 $>0.9$) tem um limiar arbitrário e
+usa um dos métodos avaliados, e várias fotos do mesmo evento dentro do corpus
+inflacionam o P@K da query que as encontra. Com 12 queries, o mAP tem incerteza
+grande.

@@ -18,9 +18,8 @@ calibrated across categories, which this argmax ignores.
 Results: <out>/part4_dino_grid.csv, <out>/part4_dino_encodings.csv,
 <out>/part4_dino_confusion_<encoding>.csv / .png.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part4_dino
-    python -m runs.run_part4_dino --compare
 """
 
 import argparse

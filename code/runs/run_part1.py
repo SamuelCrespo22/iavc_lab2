@@ -43,7 +43,7 @@ def l2(x):
     return x / np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-12)
 
 
-# map: sqrt(h) / ||sqrt(h)||_2 == sqrt(h / ||h||_1).
+# Hellinger map: sqrt(h) / ||sqrt(h)||_2 == sqrt(h / ||h||_1).
 FEATURE_MAPS = {
     "none": lambda h: h,
     "l1": l1,

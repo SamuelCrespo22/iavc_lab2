@@ -9,7 +9,10 @@ normalização por encoding: BoVW global com mapa de Hellinger; VLAD e FV com
 tiles $2\times2$, \emph{signed square root} + L2. Não reutilizámos a escolha
 da Parte~2, que dava normalizações diferentes à VLAD consoante $K$. Os
 codebooks e o PCA são ajustados só com dados de treino, e a saída do PCA é
-L2-normalizada. O classificador é o SVM linear da Parte~1 ($C=10$). Cada
+L2-normalizada. O classificador é o SVM linear da Parte~1 ($C=10$). Com
+\texttt{max\_iter}$=100$, os SVMs sobre o BoVW e sobre features com PCA não
+convergem; numa amostra de 17 condições, convergir muda o AP de test no máximo
+0.005. Cada
 condição corre com 3 seeds (90\,\% estratificado do treino, PCA reajustado), e
 reportamos o mAP de test (média $\pm$ desvio). Nada é selecionado nesta parte,
 por isso todas as condições são reportadas no test, como pede o enunciado. Os
@@ -20,7 +23,7 @@ conta $d \times 4$\,B (float32) para todas as representações.
 \centering
 \caption{Condições A--D (BoVW) e o equivalente para VLAD/FV com $K=64$.
 Extração = SIFT + encoding por imagem. Inferência = projeção PCA + SVM por
-imagem. O ajuste do PCA demora 0.32\,s (BoVW), 1.12\,s (VLAD) e 1.75\,s (FV).
+imagem, sem a normalização (ao contrário das Tabs.~\ref{tab:part2} e \ref{tab:part4}). Com $d=128$, o ajuste do PCA demora 0.32\,s (BoVW), 1.12\,s (VLAD) e 1.75\,s (FV).
 Accuracy (threshold 0) entre 0.83 e 0.89 em todas as linhas.}
 \label{tab:part3}
 \small
@@ -38,7 +41,7 @@ D & BoVW $K{=}128$            &   128 & --      & $0.593 \pm .005$ & 0.647 & 19.
 D & BoVW $K{=}32$             &    32 & --      & $0.494 \pm .009$ & 0.602 &  7.0 & 159 & 0.004 & 0.02 & 0.125 \\
 \midrule
 B & VLAD $K{=}64$             & 20480 & --      & $0.766 \pm .004$ & 0.775 &  8.1 & 207 & 1.245 & 6.55 & 80 \\
-C & VLAD $K{=}64$ + PCA       &   128 & 99.4\,\% & $0.732 \pm .003$ & 0.781 &  8.1 & 207 & 0.008 & 41.8 & 0.5 \\
+C & VLAD $K{=}64$ + PCA       &   128 & 99.4\,\% & $0.732 \pm .003$ & 0.781 &  8.1 & 207 & 0.008 & 41.7 & 0.5 \\
 B & FV $K{=}64$               & 41216 & --      & $0.798 \pm .002$ & 0.789 & 55.7 & 325 & 2.777 & 12.5 & 161 \\
 C & FV $K{=}64$ + PCA         &   128 & 99.7\,\% & $0.750 \pm .005$ & 0.793 & 55.7 & 325 & 0.008 & 74.5 & 0.5 \\
 \bottomrule
@@ -57,7 +60,7 @@ sem PCA. No BoVW, a linha tracejada é a condição D ($K=d$, sem PCA).}
 \paragraph{Um codebook maior ajuda antes do PCA?}
 Sim, mas os ganhos diminuem. O mAP do BoVW passa de 0.494 ($K=32$) para 0.632
 ($K=256$) e 0.681 ($K=1024$), e a última duplicação já só acrescenta $+0.014$.
-O erro de quantização relativo desce de 0.52 para 0.43 ($K=128\to1024$) e é
+O erro de quantização relativo no test desce de 0.52 para 0.43 ($K=128\to1024$) e é
 quase igual em treino e test, por isso o vocabulário maior descreve melhor os
 patches sem sobreajustar. O ganho de $K=256$ para 1024 é desigual entre
 classes: motorbike $+0.103$ e horse $+0.084$, mas aeroplane só $+0.007$. As
@@ -65,8 +68,7 @@ duas primeiras são definidas por estruturas locais finas (rodas e quadro;
 pernas e crina), que um vocabulário grosseiro funde com patches de outros
 objetos. O aeroplane, com tantos positivos como o motorbike, é plausivelmente
 reconhecido pelo contexto (céu, pista), que poucas palavras já captam. VLAD
-(0.709$\to$0.766) e FV (0.773$\to$0.798) seguem a mesma tendência
-\cite{chatfield2011}.
+(0.709$\to$0.766) e FV (0.773$\to$0.798) seguem a mesma tendência.
 
 \paragraph{O PCA retém o ganho?}
 Em grande parte, e a perda é gradual (Fig.~\ref{fig:part3}). O BoVW $K=1024$
@@ -85,7 +87,7 @@ VLAD $K=64$ o mAP desce em $d=256$ e recupera em $d=512$
 
 \paragraph{À mesma dimensão, grande + PCA supera pequeno?}
 Sim, até $d=256$, e a vantagem cresce com a compressão. C$-$D vale
-$+0.142$ em $d=32$, $+0.059$ em $d=128$ e $+0.028$ em $d=256$. Em $d=512$
+$+0.142$ em $d=32$, $+0.059$ em $d=128$ e $+0.027$ em $d=256$. Em $d=512$
 empatam ($-0.003$, dentro do desvio): com só metade das dimensões removidas,
 o $K=512$ direto já chega. Na Fig.~\ref{fig:part3}, as curvas ficam acima da
 tracejada em todos os outros pontos. Um k-means pequeno funde descritores só pela distância no espaço
@@ -119,5 +121,4 @@ dimensões são muito correlacionadas (resíduos de SIFT-PCA80 repetidos em 4
 tiles). Além disso, com 815--1473 imagens de treino por seed, o vetor de pesos do
 SVM vive no espaço gerado por essas imagens (teorema do representante). Das
 41\,216 dimensões do FV, no máximo $\sim$1500 direções são utilizáveis: a
-dimensão nominal exagera a capacidade e não é comparável entre encodings
-\cite{perronnin2010,jegou2010}.
+dimensão nominal exagera a capacidade e não é comparável entre encodings.

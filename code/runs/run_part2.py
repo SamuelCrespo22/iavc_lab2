@@ -11,6 +11,8 @@ validation AP over the categories; its per-class test AP and mAP are reported
 together with feature dimension, storage, extraction and SVM times.
 
 Results are written to <out>/part2_grid.csv and <out>/part2_encodings.csv.
+Test precision-recall curves of the selected settings (retrieval = test images
+ranked by SVM score, as in Part 1 Stage C) go to <out>/part2_pr_curves.png.
 
 Usage:
     python -m runs.run_part2
@@ -21,15 +23,20 @@ import re
 import time
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from sklearn.metrics import average_precision_score, precision_recall_curve
 
 from src.encoders import ImageEncoder
 from src.splits import loadProtocolSubset
-from runs.run_part1 import CATEGORIES, NUM_TILES, l2, loadData, removeSpatialInformation, trainAndEvaluate
+from runs.run_part1 import CATEGORIES, l2, loadData, removeSpatialInformation, trainAndEvaluate
 
 ENCODINGS_DIR = Path("data/encodings")
 ENCODERS_DIR = Path("data/encoders")
+NAMES = {"bovw": "BoVW", "vlad": "VLAD", "fv": "FV"}
 
 
 def signedSqrt(x):
@@ -154,6 +161,46 @@ def measureEncodings(encodings, num_images):
     return pd.DataFrame(rows.values())
 
 
+def selectSettings(grid):
+    """{encoding: (spatial, feature_map)} with the best mean val AP over the categories."""
+    mean_val = grid.groupby(["encoding", "spatial", "feature_map"], sort=False)["ap_val"].mean()
+    return {enc: (spatial, fmap) for enc, spatial, fmap in mean_val.groupby(level="encoding", sort=False).idxmax()}
+
+
+def plotPRCurves(grid, encodings, categories, C, path):
+    """Test precision-recall curves of the val-selected setting of each encoding, one panel per category.
+
+    The SVMs are retrained with the grid's settings (deterministic, seed 42), so the
+    APs in the legend equal ap_test in part2_grid.csv.
+    """
+    settings = selectSettings(grid)
+    fig, axes = plt.subplots(1, len(categories), figsize=(3.2 * len(categories), 3.4), sharey=True,
+                             squeeze=False)
+    for ax, category in zip(axes[0], categories):
+        for encoding in encodings:
+            enc_type, K, pca_dim = parseEncoding(encoding)
+            spatial, feature_map = settings[encoding]
+            data = loadData(category, encoding)
+            transform = lambda x: prepare(x, spatial, enc_type, feature_map, pca_dim or 128)
+            _, (W, b) = trainAndEvaluate(data, transform, C, return_model=True)
+            x, y, _ = data["test"]
+            scores = transform(x) @ W + b
+            precision, recall, _ = precision_recall_curve(y, scores)
+            ax.plot(recall, precision, label=f"{NAMES[enc_type]} K={K}: "
+                                             f"{average_precision_score(y, scores):.3f}")
+        ax.axhline(np.mean(y > 0), color="grey", ls=":", lw=1, label="random")
+        ax.set_title(category)
+        ax.set_xlabel("Recall")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1.02)
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=7, loc="lower left", title="test AP", title_fontsize=7)
+    axes[0][0].set_ylabel("Precision")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
 def summarize(grid, encodings_info):
     pd.set_option("display.width", 200)
     pd.set_option("display.max_columns", 30)
@@ -165,8 +212,7 @@ def summarize(grid, encodings_info):
                                  values="ap_test").round(3))
 
     # One setting per encoding, chosen on mean val AP over the categories.
-    mean_val = grid.groupby(["encoding", "spatial", "feature_map"], sort=False)["ap_val"].mean()
-    best = mean_val.groupby(level="encoding", sort=False).idxmax()
+    best = [(enc, *setting) for enc, setting in selectSettings(grid).items()]
     selected = pd.concat([grid.set_index(["encoding", "spatial", "feature_map"]).loc[[key]]
                           for key in best]).reset_index()
 
@@ -191,6 +237,10 @@ def parseArgs():
     parser.add_argument("--tiled-only", action="store_true", help="Skip the global (no tiles) variant")
     parser.add_argument("--timing-images", type=int, default=5,
                         help="Images used to time SIFT + encoding; 0 disables")
+    parser.add_argument("--pr-encodings", nargs="+", default=["bovw_K512_C0", "vlad_K32_C80", "fv_K32_C80"],
+                        help="Encodings drawn in part2_pr_curves.png")
+    parser.add_argument("--plot-only", action="store_true",
+                        help="Only draw the PR curves, from an existing <out>/part2_grid.csv")
     parser.add_argument("--out", default="results")
     return parser.parse_args()
 
@@ -199,15 +249,22 @@ if __name__ == "__main__":
     args = parseArgs()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    encodings = args.encodings or defaultEncodings()
-    print("Encodings:", ", ".join(encodings))
 
-    encodings_info = measureEncodings(encodings, args.timing_images)
-    encodings_info.to_csv(out_dir / "part2_encodings.csv", index=False)
+    if args.plot_only:
+        grid = pd.read_csv(out_dir / "part2_grid.csv")
+    else:
+        encodings = args.encodings or defaultEncodings()
+        print("Encodings:", ", ".join(encodings))
 
-    spatials = [True] if args.tiled_only else [True, False]
-    grid = runGrid(encodings, args.categories, spatials, args.C)
-    grid.to_csv(out_dir / "part2_grid.csv", index=False)
+        encodings_info = measureEncodings(encodings, args.timing_images)
+        encodings_info.to_csv(out_dir / "part2_encodings.csv", index=False)
 
-    summarize(grid, encodings_info)
+        spatials = [True] if args.tiled_only else [True, False]
+        grid = runGrid(encodings, args.categories, spatials, args.C)
+        grid.to_csv(out_dir / "part2_grid.csv", index=False)
+
+        summarize(grid, encodings_info)
+
+    pr_encodings = [e for e in args.pr_encodings if e in set(grid["encoding"])]
+    plotPRCurves(grid, pr_encodings, args.categories, args.C, out_dir / "part2_pr_curves.png")
     print(f"\nResults written to {out_dir.resolve()}")

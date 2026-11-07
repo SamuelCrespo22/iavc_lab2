@@ -36,7 +36,7 @@ DEFAULT_ENCODINGS = [
 
 # Representation fed to the SVM (and to PCA), per encoding type.
 FEATURES = {
-    "bovw": lambda x: l2(np.sqrt(removeSpatialInformation(x))),  # Hellinger
+    "bovw": lambda x: l2(np.sqrt(removeSpatialInformation(x))),  # Hellinger, "histogram dimension is exactly K"
     "vlad": lambda x: l2(signedSqrt(x)),
     "fv": lambda x: l2(signedSqrt(x)),
 }

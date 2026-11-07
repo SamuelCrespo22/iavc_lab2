@@ -1,0 +1,87 @@
+\section{Discussão}
+\label{sec:discussion}
+
+A Tab.~\ref{tab:part4} é a tabela consolidada: todos os métodos com os mesmos
+splits e o mesmo SVM, agrupados pela supervisão, com AP, dimensão e custos.
+Esta secção junta o que as partes mostram em conjunto.
+
+\paragraph{Supervisão, não dimensão.}
+O mAP de test sobe com a supervisão que a representação recebeu antes do SVM:
+0.694--0.784 nos handcrafted, que só veem as labels da tarefa, 0.961--0.964
+com pré-treino supervisionado no ImageNet, 0.981--0.984 no DINOv2 e 0.991 no
+CLIP. A dimensão não explica a ordem: o FV $K=32$ tem 20\,608-d e o DINOv2
+384-d, e na Parte~3 o PCA para 128-d custa só 0.03--0.05 à VLAD e ao FV. Sem
+nenhuma label, o CLIP zero-shot (0.826) supera todos os handcrafted em mAP,
+mas não no person (0.583 contra 0.750 do BoVW), em que o prompt não descreve o
+que o dataset chama ``person''.
+
+\begin{table}[h]
+\centering
+\caption{AP de \emph{horse} nas mesmas 1225 imagens de test (148 positivos e
+1077 de background; prevalência 0.121): SVM treinado com labels
+(Tab.~\ref{tab:part4}) contra retrieval sem classificador (Parte~5, média de
+12 queries de imagem; no CLIP, o prompt ``a photo of a horse.'').}
+\label{tab:discussion}
+\small
+\begin{tabular}{lrr}
+\toprule
+Representação & SVM & Retrieval \\
+\midrule
+BoVW $K{=}512$   & .662 & .218 \\
+VLAD $K{=}32$    & .735 & .204 \\
+ResNet-18 layer4 & .954 & .644 \\
+DINOv2 CLS       & .994 & .859 \\
+CLIP             & .992 & .811 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Com e sem classificador.}
+Nas mesmas imagens, o SVM e o retrieval separam as duas famílias
+(Tab.~\ref{tab:discussion}). Nos handcrafted, o SVM faz quase todo o
+trabalho: sem ele, o AP cai para menos de um terço, menos do dobro do acaso
+(0.121). Nos profundos, o DINOv2 mantém 86\,\% do AP sem nenhuma label, porque
+imagens do mesmo objeto já ficam próximas no espaço do embedding. O CLIP
+zero-shot da Parte~4 e o CLIP texto da Parte~5 são o mesmo ranking (0.811). É
+esta geometria que torna os modelos pré-treinados úteis para retrieval e com
+poucas labels.
+
+\paragraph{Quantas labels são precisas.}
+No val, o BoVW precisa de todo o treino (0.716), e a curva ainda não satura
+(Parte~1, Stage~G). O DINOv2 com 1 positivo por classe (0.779) já o supera,
+com 5 chega a 0.945 e com 20 satura (0.966). O CLIP zero-shot, sem labels, dá
+0.857, entre o DINOv2 com 1 e com 5 positivos. As labels necessárias passam de
+dezenas ou centenas de positivos para uma mão-cheia, ou nenhuma.
+
+\paragraph{Erros comuns.}
+Os mesmos erros aparecem em todas as partes, com features muito diferentes, o
+que aponta para os dados e não para os métodos \cite{torralba2011}.
+\emph{Contexto}: o BoVW da motorbike pesa asfalto e barreiras de pneus
+(Parte~1), o DINOv2 espalha a evidência pelo céu e pela estrada (Parte~4), e o
+retrieval handcrafted emparelha a relva (Parte~5). \emph{Co-ocorrência}: 78\,\%
+dos cavalos de test têm pessoas, e as queries com cavaleiro são as mais
+fáceis (Parte~5). \emph{Animais parecidos}: as vacas são falsos positivos de
+horse no SVM da ResNet, no zero-shot (106 imagens de background classificadas
+como horse) e no retrieval. \emph{Objetos pequenos ou fora do crop}: falham em
+todos os modelos profundos (Parte~4).
+
+\paragraph{Custos.}
+A extração domina em todos os métodos, e é aí que os profundos ganham: 18--52\,ms
+por imagem em CPU contra 216--327\,ms de SIFT + encoding
+(Tabs.~\ref{tab:part2} e \ref{tab:part4}), sem codebook nem GMM para ajustar.
+Os vetores profundos são também mais pequenos (1.5--3\,KB contra 8--161\,KB) e
+mais rápidos de classificar ou comparar: 3--7 contra 20--807\,$\mu$s por imagem
+no SVM, e 0.16--0.23 contra 1.3--8.7\,ms por query em 2474 imagens. Nos
+handcrafted, o PCA corta a memória até $322\times$ (Parte~3), mas não a
+extração, que tem de calcular primeiro a representação completa.
+
+\paragraph{Limitações.}
+Os resultados vêm de um único split. O val tem só 22--28 positivos em
+aeroplane, motorbike e horse, por isso escolhas com diferenças $\le0.01$
+(normalizações da VLAD, $K=512$ contra 1024) estão dentro do ruído. O SVM do
+código fornecido (\texttt{max\_iter}$=100$) não converge em muitos casos, o que
+muda o AP até 0.005 (Parte~3). Os tempos handcrafted vêm de 5 imagens e de
+duas medições. As labels são por imagem: objetos pequenos ou não anotados
+contam como erro, e as imagens com várias categorias saem das matrizes de
+confusão. O crop central de 224\,px dos modelos profundos corta objetos no
+bordo. O retrieval cobre uma só categoria e 12 queries.

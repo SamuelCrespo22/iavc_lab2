@@ -22,7 +22,7 @@ the L2-normalized image and class embeddings.
 Results (in --out): part4_clip_prompts.csv, part4_clip_test.csv,
 part4_clip_classification.csv, part4_clip_confusion.csv / .png, part4_clip_costs.csv.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part4_clip
 """
 

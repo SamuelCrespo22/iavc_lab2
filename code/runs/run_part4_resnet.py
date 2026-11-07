@@ -2,17 +2,16 @@
 
 Evaluates the ResNet-18 encodings written by src.extract_deep (GAP of layer2 /
 layer3 / layer4, 128 / 256 / 512-d, L2-normalized) with the Part 1 linear SVM
-per category, against the BoVW / VLAD / FV settings selected in Part 2 (their
-dimension, storage and extraction cost are read from part2_encodings.csv).
+per category, against the BoVW / VLAD / FV settings selected in Part 2 
+(part2_encodings.csv).
 Extract the features first:
 
     python -m src.extract_deep --flip
 
 Results: <out>/part4_resnet_grid.csv and <out>/part4_resnet_encodings.csv.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part4_resnet
-    python -m runs.run_part4_resnet --no-baselines --categories motorbike
 """
 
 import argparse
@@ -26,8 +25,6 @@ from runs.run_part1 import CATEGORIES, l2, loadData, trainAndEvaluate
 from runs.run_part2 import ENCODINGS_DIR, parseEncoding
 from runs.run_part2 import prepare as prepareHandcrafted
 
-# Same names as src.extract_deep (not imported: it loads torch, which clashes
-# with numpy's OpenMP runtime in the cvc-a2 env).
 LAYERS = ["layer2", "layer3", "layer4"]
 
 # Deep features are L2-normalized, the same map for every model.

@@ -17,7 +17,7 @@ Com o backbone congelado e o mesmo SVM linear, comparamos pré-treino supervisio
     \item \textbf{BoVW (Sec.~\ref{sec:part1}):} Hellinger com tiles $2\times2$ é a melhor combinação. Com 10\,\% do treino, iguala o L2 com 50\,\%.
     \item \textbf{VLAD/FV (Sec.~\ref{sec:part2}):} com $K{=}32$, o mAP de test sobe de 0.694 (BoVW) para 0.746 e 0.784.
     \item \textbf{PCA (Sec.~\ref{sec:part3}):} à mesma dimensão, vocabulário grande + PCA supera vocabulário pequeno, mas o custo de extração não baixa.
-    \item \textbf{Pré-treinados (Sec.~\ref{sec:part4}):} ResNet-18 0.964, ViT-B/32 0.961, DINOv2 0.984, CLIP + SVM 0.991. Em validação, o DINOv2 com 1 positivo supera em média o BoVW com todos (0.779 contra 0.717). O CLIP zero-shot chega a 0.826.
-    \item \textbf{Retrieval por query (Sec.~\ref{sec:part5}):} sem SVM, BoVW/VLAD/FV ficam perto do acaso (mAP 0.08--0.12, aleatório 0.060). O DINOv2 chega a 0.806 e o CLIP texto a 0.803.
+    \item \textbf{Pré-treinados (Sec.~\ref{sec:part4}):} ResNet-18 0.964, ViT-B/32 0.961, DINOv2 0.981 (CLS), CLIP + SVM 0.991. Em validação, o DINOv2 com 1 positivo supera em média o BoVW com todos (0.779 contra 0.717). O CLIP zero-shot chega a 0.826.
+    \item \textbf{Retrieval por query (Sec.~\ref{sec:part5}):} sem SVM, BoVW e VLAD ficam perto do acaso (mAP 0.105 e 0.119, aleatório 0.060). O DINOv2 chega a 0.806 e o CLIP texto a 0.803.
 \end{itemize}
-A Sec.~\ref{sec:comparison} compara todos os métodos e discute custos e limitações. A Sec.~\ref{sec:conclusion} conclui.
+A Sec.~\ref{sec:discussion} junta os resultados das cinco partes e discute custos e limitações. A Sec.~\ref{sec:conclusion} conclui.

@@ -27,9 +27,8 @@ Extract the features with flips first: python -m src.extract_deep -m dinov2_vits
 Results (in --out): part4_fewshot.csv / .png, part4_tta.csv,
 part4_svm_c.csv / .png, part4_svm_c_test.csv.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part4_fewshot
-    python -m runs.run_part4_fewshot --encoding resnet18_layer4 --feature-map sqrt_l2
 """
 
 import argparse

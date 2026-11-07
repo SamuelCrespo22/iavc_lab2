@@ -14,7 +14,7 @@ Setting: the supplied vocabulary (bovw_K512_C0), 2x2 tiles and the Hellinger
 map, the setting with the best mean validation AP in run_part1. Linear SVM,
 C = 10, positives vs. background, protocol splits.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part1_inspect
 """
 

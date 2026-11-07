@@ -6,9 +6,8 @@ questions are kept in answers/). Parts or
 stages whose results are missing are listed as pending, with the command that
 produces them. Nothing is recomputed: rerun a run_part script to update a table.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.report
-    python -m runs.report --parts 1 3
 """
 
 import argparse
@@ -335,6 +334,9 @@ def reportPart2(results):
     lines += ["Comparison of the three encodings (selected settings). Codebook fit = PCA + k-means / GMM, once; "
               "SIFT and encoding time per image on 5 test images (CPU); storage as stored on disk; SVM training "
               "and inference (per test image) averaged over the categories:", "", md(table), ""]
+    lines += ["Retrieval: test images ranked by the SVM score of the selected setting, precision-recall curves "
+              "(dotted line = positive rate, i.e. a random ranking):", ""]
+    lines += figure(results, "part2_pr_curves.png")
     return lines
 
 

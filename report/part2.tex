@@ -1,0 +1,83 @@
+\section{Advanced encodings: VLAD and Fisher Vectors}
+\label{sec:part2}
+
+\paragraph{Protocolo.}
+Trocámos o BoVW pela VLAD e pelo FV, com o mesmo dense SIFT (PCA para 80-d),
+os mesmos splits e o mesmo SVM ($C=10$). Avaliámos $K\in\{16,32,64\}$, com
+k-means e GMM ajustados só no treino. Em cada encoding, os tiles e a
+normalização foram escolhidos pelo mAP de val, e o test foi avaliado uma vez
+(Tab.~\ref{tab:part2}). O retrieval é o ranking do test pelo score do SVM
+(Fig.~\ref{fig:part2-pr}).
+
+\paragraph{Seleção no val.}
+Com a melhor normalização, os tiles $2\times2$ ganham sempre ($+0.01$ a
+$+0.13$). O passo decisivo é a
+\emph{signed square root} (SSR) antes do L2: com $K=32$, o mAP de val sobe de
+0.715 para 0.790 na VLAD e de 0.710 para 0.784 no FV. Tal como o Hellinger, a
+SSR atenua os elementos ``bursty''. A intra-normalização só foi escolhida na
+VLAD $K=32$ e $64$, por no máximo $+0.010$, o que está dentro do ruído (22--28
+positivos de val em três classes). Visto a posteriori no test, sem ela a VLAD
+$K=64$ daria 0.772 em vez de 0.766.
+
+\begin{table*}[t]
+\centering
+\caption{AP de test e custos da configuração escolhida. Extr.\ = SIFT
+(152\,ms) + encoding, por imagem, em CPU (5 imagens). KB = $d\times4$\,B.
+Inf.\ = normalização + SVM, por imagem de test.}
+\label{tab:part2}
+\small
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+Encoding & mbike & aero & person & horse & car & mAP & $d$ & KB/img & Extr.\ (ms) & Inf.\ ($\mu$s) \\
+\midrule
+BoVW $K{=}512$ & .632 & .691 & .750 & .662 & .734 & .694 &  2048 &   8   & 254 &  20 \\
+\midrule
+VLAD $K{=}16$  & .680 & .694 & .761 & .670 & .764 & .714 &  5120 &  20   & 216 &  91 \\
+VLAD $K{=}32$  & .707 & .726 & .768 & .735 & .793 & .746 & 10240 &  40   & 224 & 230 \\
+VLAD $K{=}64$  & .745 & .765 & .798 & .717 & .805 & .766 & 20480 &  80   & 230 & 458 \\
+\midrule
+FV $K{=}16$    & .776 & .729 & .800 & .769 & .798 & .775 & 10304 &  40   & 251 & 205 \\
+FV $K{=}32$    & .783 & .759 & .811 & .758 & .807 & .784 & 20608 &  81   & 278 & 389 \\
+FV $K{=}64$    & .810 & .788 & .820 & .770 & .828 & \textbf{.803} & 41216 & 161 & 327 & 807 \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/part2_pr_curves.png}
+\caption{Curvas PR de test (BoVW $K=512$, VLAD e FV $K=32$), com o AP na
+legenda. A linha pontilhada é um ranking aleatório.}
+\label{fig:part2-pr}
+\end{figure*}
+
+\paragraph{Stage H: ganho da VLAD e $K$ vs.\ $K\times D$.}
+Só por trocar o encoding, o mAP de test sobe de 0.694 para 0.714, 0.746 e
+0.766 ($K=16$, 32, 64), e todas as classes melhoram. O BoVW conta os
+descritores de cada palavra (ordem~0). A VLAD soma os seus resíduos ao centro
+($D=80$ valores por palavra, ordem~1), ou seja, diz onde caem na célula e não
+só quantos são. Por isso bastam poucas palavras: a VLAD $K=16$ (5120-d) já
+supera o BoVW $K=512$. Para o mesmo $K$, a dimensão nominal passa de $K$ para
+$K\times D$ (por tile), e a memória e a inferência do SVM crescem com ela (de 20 para 91--458\,$\mu$s). O
+codebook (2--8\,s contra 64\,s) e o encoding ficam até mais baratos, por haver
+menos centros. A dimensão nominal exagera a capacidade: as configurações escolhidas
+separam o treino (AP 1.000), e só o test as distingue.
+
+\paragraph{Stage I: Fisher Vectors.}
+O FV é o melhor em todos os $K$ e em todas as classes (até 0.803). Com a mesma
+dimensão, vence a VLAD (FV $K=16$, 10304-d: 0.775; VLAD $K=32$, 10240-d:
+0.746). Face à VLAD, acrescenta estatísticas de 2.ª ordem (a dispersão dos
+descritores face à variância do GMM), atribuição suave pela probabilidade a
+posteriori e resíduos normalizados pelo desvio padrão e pelo peso de cada
+componente. A dimensão é $2KD+K$ por tile, o dobro. O custo sobe em tudo: o EM
+demora cerca de $7\times$ o k-means (15--56\,s), o encoding $1.5$--$2.3\times$,
+a memória duplica e a inferência sobe $1.7$--$2.3\times$. Compensa: o FV
+$K=16$ já supera todas as VLAD.
+
+\paragraph{Retrieval.}
+As curvas PR (Fig.~\ref{fig:part2-pr}) mostram que o ganho está no topo do
+ranking. No motorbike, o BoVW tem precisão 1 só até 14\,\% de recall e o FV
+até 29\,\%. Aos 60\,\% de recall, a precisão é 0.61 no BoVW e 0.88 no FV.
+Para recall alto as curvas juntam-se (aos 90\,\%, diferem no máximo 0.10): os
+positivos difíceis são-no para os três encodings, que partem do mesmo SIFT.

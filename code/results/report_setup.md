@@ -13,7 +13,6 @@ Setup, the same for every stage:
 - Figures of Stages A–D: `python -m runs.run_part1_inspect`.
 - Environment: AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD, no GPU used; Python 3.11.9, numpy 2.4.6, scikit-learn 1.9.1, torch 2.14.0, torchvision 0.29.0, cyvlfeat 0.7.1.
 
-
 ## Part 2 — Advanced encodings: VLAD and Fisher Vectors
 
 Setup, the same for every stage:
@@ -24,6 +23,7 @@ Setup, the same for every stage:
 - Normalizations: `none`, `l2`, `ssr_l2` = signed square root + L2 (power normalization), `intra_l2` = L2 of each word's residual block, then global L2 (VLAD only), `ssr_intra_l2` = both.
 - Selection: per encoding, the layout and normalization with the highest validation mAP; the test set only reports that setting.
 - BoVW baseline: bovw_K512_C0, setting selected in the same way (the Part 1 choice).
+
 
 ## Part 3 — Large visual vocabularies with PCA vs. smaller vocabularies
 
@@ -38,7 +38,6 @@ Setup, the same for every table:
 - Codebooks (PCA80 + k-means / GMM, fitted once per K) are learned without labels from descriptors of the protocol training images only (733 images, 400 descriptors each, the same sample for every encoder); validation and test images are never seen.
 - Times, all on CPU: SIFT + encoding per image on 5 images, codebook fit once, PCA and SVM fit per category, inference = PCA projection + SVM per test image.
 - Storage (`kb_per_image`) = final dimension × 4 bytes (float32) for every representation, so that sizes are comparable; Part 2 reports the arrays as stored (BoVW int64, FV float64).
-
 
 ## Part 4 — Pretrained visual representations: CNN, DINOv2 and CLIP
 

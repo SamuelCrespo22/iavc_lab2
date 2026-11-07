@@ -3,22 +3,18 @@
 Reads the CSVs written by runs.run_part5 (run it first, with the same --out)
 and draws:
 
-  part5_methods.png          mAP (+- std over queries) and P@5 / P@10 / P@20 per method
   part5_per_query.png        AP of every query per method, by query group
-  part5_vocab_pca.png        BoVW mAP vs. K; mAP vs. dimension with PCA (+ whitening)
+  part5_vocab_pca.png        BoVW mAP vs. K; mAP vs. dimension with PCA
   part5_prompts.png          CLIP text-to-image AP per wording of the query
   part5_corpus_size.png      mAP vs. corpus size (fewer irrelevant images)
-  part5_ranked_easy.png      top results of every method for the query with the
-  part5_ranked_hard.png      highest / lowest mean AP over methods (or --queries)
-  part5_ranked_text.png      top results of every CLIP text query
+  part5_ranked_hard.png      top results of every image method for the query with
+                             the lowest mean AP over methods (or --query)
 
-In the ranked grids the query has a blue frame, relevant results a green one and
-irrelevant results a red one, with the similarity score above. The images shown
-are listed in part5_examples.csv.
+In the ranked grid the query has a blue frame, relevant results a green one and
+irrelevant results a red one, with the similarity score above.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part5_visual
-    python -m runs.run_part5_visual --num 10 --queries 002471 007185
 """
 
 import os
@@ -37,9 +33,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageOps
 
-from runs.run_part4_clip import loadClip
-from runs.run_part5 import (CLIP_ENCODING, IMG_DIR, METHODS, deep, encodeText, loadSetup, promptQueries,
-                            scores, vectors)
+from runs.run_part5 import IMG_DIR, METHODS, loadSetup, scores, vectors
 
 FRAME = {"query": "tab:blue", True: "tab:green", False: "tab:red"}
 
@@ -47,26 +41,6 @@ FRAME = {"query": "tab:blue", True: "tab:green", False: "tab:red"}
 def optional(out_dir, name):
     path = out_dir / name
     return pd.read_csv(path) if path.exists() else None
-
-
-def plotMethods(summary, prevalence, path):
-    metrics = ["mAP"] + [c for c in ["P@5", "P@10", "P@20"] if c in summary]
-    x = np.arange(len(summary))
-    width = 0.8 / len(metrics)
-    fig, ax = plt.subplots(figsize=(1.1 * len(summary) + 2, 4))
-    for i, metric in enumerate(metrics):
-        ax.bar(x + (i - (len(metrics) - 1) / 2) * width, summary[metric], width, label=metric,
-               yerr=summary["AP_std"].fillna(0) if metric == "mAP" else None, capsize=2)
-    ax.axhline(prevalence, color="gray", ls=":", label=f"random ranking (AP = {prevalence:.3f})")
-    ax.set_xticks(x, summary["method"], rotation=30, ha="right")
-    ax.set_ylim(0, 1.1)
-    ax.set_ylabel("Mean over queries")
-    ax.set_title("Retrieval quality per method (error bar: std of AP over queries)")
-    ax.grid(axis="y", alpha=0.3)
-    ax.legend(fontsize=8, ncol=len(metrics) + 1, loc="upper left")
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
 
 
 def plotPerQuery(per_query, prevalence, path):
@@ -98,29 +72,21 @@ def plotVocabPCA(vocab, pca, path):
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.2))
     ax = axes[0]
     if vocab is not None:
-        similarities = list(dict.fromkeys(vocab["similarity"]))
-        for (similarity, spatial), df in vocab.groupby(["similarity", "spatial"], sort=False):
-            ax.plot(df["K"], df["mAP"], marker="o", ls="--" if spatial else "-",
-                    color=f"C{similarities.index(similarity)}",
-                    label=f"{similarity}, {'2x2 tiles' if spatial else 'global'}")
+        ax.plot(vocab["K"], vocab["mAP"], marker="o", label="global BoVW, Hellinger")
         ax.set_xscale("log", base=2)
         ax.legend(fontsize=7)
     ax.set_xlabel("Vocabulary size K")
     ax.set_ylabel("mAP")
-    ax.set_title("BoVW: vocabulary size and similarity")
+    ax.set_title("BoVW: vocabulary size")
     ax.grid(alpha=0.3)
 
     ax = axes[1]
     if pca is not None:
         for i, (encoding, df) in enumerate(pca.groupby("encoding", sort=False)):
-            for whiten, wdf in df[df["pca_dim"] > 0].groupby("whiten"):
-                ax.plot(wdf["dim"], wdf["mAP"], marker="o", color=f"C{i}", ls="--" if whiten else "-",
-                        label=f"{encoding} + PCA{' + whitening' if whiten else ''}")
+            reduced = df[df["pca_dim"] > 0]
+            ax.plot(reduced["dim"], reduced["mAP"], marker="o", color=f"C{i}", label=f"{encoding} + PCA")
             full = df[df["pca_dim"] == 0].iloc[0]
             ax.scatter(full["dim"], full["mAP"], marker="*", s=140, color=f"C{i}", label=f"{encoding}, no PCA")
-    if vocab is not None:
-        direct = vocab[~vocab["spatial"] & (vocab["similarity"] == "cosine (Hellinger)")]
-        ax.plot(direct["K"], direct["mAP"], color="gray", marker="s", ls=":", label="BoVW K = d, no PCA (global)")
     ax.set_xscale("log", base=2)
     ax.set_xlabel("Final dimension")
     ax.set_title("PCA: dimension vs. retrieval quality")
@@ -182,22 +148,10 @@ def imageRankings(setup, methods, query, num):
     idx = setup["queries"].index[setup["queries"]["name"] == query][0]
     out = {}
     for method in methods:
-        encoding, transform, measure = METHODS[method]
-        Q, X = vectors(setup, encoding, transform)
-        s = scores(Q[idx:idx + 1], X, measure)[0]
+        Q, X = vectors(setup, *METHODS[method])
+        s = scores(Q[idx:idx + 1], X)[0]
         top = np.argsort(-s, kind="stable")[:num]
         out[method] = list(zip(corpus["name"].iloc[top], corpus["relevant"].iloc[top], s[top]))
-    return out
-
-
-def textRankings(setup, model, num):
-    corpus = setup["corpus"]
-    _, X = vectors(setup, CLIP_ENCODING, deep)
-    out = {}
-    for level, prompts in promptQueries(setup["category"]).items():
-        s = X @ encodeText(model, prompts)
-        top = np.argsort(-s, kind="stable")[:num]
-        out[level] = list(zip(corpus["name"].iloc[top], corpus["relevant"].iloc[top], s[top]))
     return out
 
 
@@ -211,17 +165,15 @@ def frame(ax, color):
 
 def plotRanked(rankings, query, title, path):
     num = max(len(r) for r in rankings.values())
-    offset = 1 if query is not None else 0
-    fig, axes = plt.subplots(len(rankings), num + offset, figsize=(1.45 * (num + offset), 1.6 * len(rankings)),
+    fig, axes = plt.subplots(len(rankings), num + 1, figsize=(1.45 * (num + 1), 1.6 * len(rankings)),
                              squeeze=False)
     for r, (row_name, ranking) in enumerate(rankings.items()):
-        if query is not None:
-            axes[r][0].imshow(thumbnail(query))
-            frame(axes[r][0], FRAME["query"])
-            axes[r][0].set_title("query", fontsize=7)
+        axes[r][0].imshow(thumbnail(query))
+        frame(axes[r][0], FRAME["query"])
+        axes[r][0].set_title("query", fontsize=7)
         axes[r][0].set_ylabel(row_name, fontsize=8)
         for c, (name, relevant, score) in enumerate(ranking):
-            ax = axes[r][c + offset]
+            ax = axes[r][c + 1]
             ax.imshow(thumbnail(name))
             frame(ax, FRAME[bool(relevant)])
             ax.set_title(f"{c + 1}: {score:.2f}", fontsize=7)
@@ -231,18 +183,11 @@ def plotRanked(rankings, query, title, path):
     plt.close(fig)
 
 
-def exampleRows(figure, rankings, setup):
-    labels = setup["corpus"].set_index("name")["labels"]
-    return [{"figure": figure, "row": row_name, "rank": rank + 1, "name": name, "relevant": bool(relevant),
-             "labels": labels[name], "score": score}
-            for row_name, ranking in rankings.items() for rank, (name, relevant, score) in enumerate(ranking)]
-
-
 def parseArgs():
     parser = argparse.ArgumentParser(description="Part 5: figures of the retrieval challenge.")
     parser.add_argument("--num", type=int, default=8, help="Results shown per ranked list")
-    parser.add_argument("--queries", nargs="+", default=None,
-                        help="Query images of the ranked grids (default: highest and lowest mean AP)")
+    parser.add_argument("--query", default=None,
+                        help="Query image of the ranked grid (default: lowest mean AP over methods)")
     parser.add_argument("--out", default="results")
     return parser.parse_args()
 
@@ -254,10 +199,8 @@ if __name__ == "__main__":
         raise SystemExit("Missing part5_methods.csv: run `python -m runs.run_part5` first")
     setup = loadSetup(out_dir)
     prevalence = setup["corpus"]["relevant"].mean()
-    summary = pd.read_csv(out_dir / "part5_methods.csv")
     per_query = pd.read_csv(out_dir / "part5_per_query.csv", dtype={"query": str})
 
-    plotMethods(summary, prevalence, out_dir / "part5_methods.png")
     plotPerQuery(per_query, prevalence, out_dir / "part5_per_query.png")
     plotVocabPCA(optional(out_dir, "part5_vocab.csv"), optional(out_dir, "part5_pca.csv"),
                  out_dir / "part5_vocab_pca.png")
@@ -268,20 +211,11 @@ if __name__ == "__main__":
     if corpus is not None:
         plotCorpus(corpus, out_dir / "part5_corpus_size.png")
 
-    # Ranked lists: the image methods of the main comparison.
-    methods = [m for m in summary["method"] if m in METHODS]
-    images = per_query[per_query["method"].isin(methods)]
-    mean_ap = images.groupby("query")["AP"].mean()
-    queries = args.queries or [mean_ap.idxmax(), mean_ap.idxmin()]
-    labels = ["easy", "hard"] if args.queries is None else [f"q{q}" for q in queries]
-    examples = []
-    for label, query in zip(labels, queries):
-        rankings = imageRankings(setup, methods, query, args.num)
-        plotRanked(rankings, query, f"Query {query} (mean AP over methods {mean_ap[query]:.3f}): "
-                   "green = relevant, red = irrelevant", out_dir / f"part5_ranked_{label}.png")
-        examples += exampleRows(f"ranked_{label}", rankings, setup)
-    rankings = textRankings(setup, loadClip(), args.num)
-    plotRanked(rankings, None, "CLIP text-to-image: top results per text query", out_dir / "part5_ranked_text.png")
-    examples += exampleRows("ranked_text", rankings, setup)
-    pd.DataFrame(examples).to_csv(out_dir / "part5_examples.csv", index=False)
+    # Ranked list of every image method for the hardest query (successes and failures).
+    methods = list(METHODS)
+    mean_ap = per_query[per_query["method"].isin(methods)].groupby("query")["AP"].mean()
+    query = args.query or mean_ap.idxmin()
+    plotRanked(imageRankings(setup, methods, query, args.num), query,
+               f"Query {query} (mean AP over methods {mean_ap[query]:.3f}): green = relevant, red = irrelevant",
+               out_dir / "part5_ranked_hard.png")
     print(f"Figures written to {out_dir.resolve()}")

@@ -1,0 +1,12 @@
+\section{Conclusões}
+\label{sec:conclusion}
+
+A representação pesa mais do que o classificador ou a dimensão. Com labels, o
+melhor é o CLIP + SVM (mAP 0.991), com o DINOv2 logo atrás (0.981--0.984) e
+mais compacto (384-d). Com poucas labels, o DINOv2 chega a 0.945 de mAP de val
+com 5 positivos por classe. Sem labels, o CLIP zero-shot (0.826) já supera
+todos os handcrafted, mas depende do prompt e falha em classes mal definidas
+como person. Sem classificador, só os embeddings profundos servem para
+retrieval, e o DINOv2 é o melhor e o mais barato (mAP 0.806, 3.6\,MB de corpus,
+0.16\,ms por query). Se for preciso ficar nos handcrafted, o FV é o melhor em
+todos os $K$, e o PCA comprime-o $80\times$ por $-0.013$ de mAP (Parte~3).

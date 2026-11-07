@@ -33,9 +33,8 @@ to its SVM score.
 
 Results (in --out): part4_examples_<method>.png and part4_examples.csv.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.run_part4_visual
-    python -m runs.run_part4_visual --methods resnet18 --categories horse --num 4
 """
 
 import os

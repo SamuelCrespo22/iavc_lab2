@@ -1,0 +1,161 @@
+\section{Handcrafted features: BoVW and linear SVM}
+\label{sec:part1}
+
+\paragraph{Protocolo.}
+SVM linear ($C=10$) por categoria (positivos contra background) sobre o BoVW,
+com $K\in\{256,512,1024\}$, tiles $2\times2$ ou global, e seis mapas. A
+escolha é feita pelo mAP de validação, e o test é avaliado uma vez.
+
+\paragraph{Stage A -- vocabulário e tiles.}
+Nas imagens de treino, a escala e o enquadramento variam muito: aviões
+minúsculos no céu ou a ocupar a imagem, pessoas de corpo inteiro, só partes ou
+pequenas ao fundo, e carros muitas vezes secundários numa cena de rua. O
+contexto é típico em cada classe (pistas nas motos, céu nos aviões, obstáculos
+de saltos nos cavalos). O background é sobretudo de interiores e animais
+domésticos, com iluminação e clutter muito variáveis. Escolhemos $K$ na validação, onde o mAP satura face ao custo
+(Tab.~\ref{tab:part1-k}). Ficámos com $K=512$ (0.717 contra 0.712 com
+$K=1024$). Um $K$ maior dá mais capacidade e menos erro de quantização, mas o
+k-means fica mais lento e a dimensão, o armazenamento e a inferência crescem
+linearmente. Os tiles codificam o layout (rodas e asfalto em baixo, céu em
+cima) e ganham ao global em todos os $K$. Prejudicam a generalização quando o
+objeto muda de posição ou escala, e quadruplicam a dimensão com os mesmos
+dados de treino.
+
+\begin{table}[t]
+\centering
+\caption{Efeito de $K$ (Hellinger). Erro de quantização relativo no treino;
+extração = SIFT + encoding; inferência por imagem.}
+\label{tab:part1-k}
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{rrccrrrrr}
+\toprule
+$K$ & $d$ & \multicolumn{2}{c}{mAP val} & Erro & Codeb. & Extr. & KB & Inf. \\
+ & (tiles) & tiles & global & quant. & (s) & (ms) & /img & ($\mu$s) \\
+\midrule
+256  & 1024 & .705 & .640 & .476 & 31.1 & 186 & 4  & 9.9 \\
+512  & 2048 & \textbf{.717} & .668 & .444 & 64.0 & 218 & 8  & 19.8 \\
+1024 & 4096 & .712 & .699 & .419 & 87.1 & 282 & 16 & 38.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Stage B -- motorbike.}
+Esperávamos um treino quase perfeito (2048 dimensões, 96 positivos) e um test
+pior. Obtivemos um AP de treino de 1.000 e de test 0.632. Com tantas
+dimensões, o SVM separa o treino memorizando fundos e correlações espúrias.
+As imagens do topo do ranking partilham o objeto (rodas, vistas de lado), mas
+também o contexto: as palavras com maior peso são asfalto e barreiras de
+pneus, e um ganso em água lisa chega ao rank~18 (Fig.~\ref{fig:part1-words}).
+No fim do ranking de treino estão close-ups de cães e gatos, interiores, uma
+ave e o mar, todos sem asfalto nem estrutura de estrada.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/part1_words.png}
+\caption{Palavras com maior contribuição para o score da melhor moto de test
+e do background com maior score.}
+\label{fig:part1-words}
+\end{figure}
+
+\paragraph{Stage C -- test.}
+No test, o AP de motorbike é 0.632 (Fig.~\ref{fig:part1-pr}). No threshold~0,
+a precisão é 0.701 e o recall 0.488 (TP 61, FP 26, FN 64, TN 1051). O bias $b$
+soma a mesma constante a todos os scores, por isso não muda a ordem, nem a
+curva PR, nem o AP. Só decide onde fica o threshold~0. O AP pesa sobretudo o
+topo do ranking: cada negativo acima de um positivo baixa a precisão de todos
+os positivos seguintes.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/part1_pr_curves.png}
+\caption{Curvas PR no treino (tracejado) e no test (contínuo).}
+\label{fig:part1-pr}
+\end{figure*}
+
+\paragraph{Stage D -- outras categorias.}
+O mAP de test é 0.694 (Tab.~\ref{tab:part1-test}). Como o AP aleatório é a
+prevalência $p$, normalizamos. O person, com o AP mais alto, passa a ser a
+classe mais difícil, apesar de ter 821 positivos (o aeroplane tem 90). O que
+explica as diferenças é a variação intra-classe e de escala (pessoas inteiras,
+partes, pequenas ao fundo, diluídas no histograma) e o contexto. Os aviões têm
+céu e pista, raros no background. Além disso, 78\,\% dos cavalos têm pessoas,
+e o SVM nunca é penalizado por usar esse contexto.
+
+\begin{table}[t]
+\centering
+\caption{AP de test ($K=512$). Norm. $=(\text{AP}-p)/(1-p)$. L2: tiles sem
+raiz. Global: Hellinger sem tiles.}
+\label{tab:part1-test}
+\small
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrr}
+\toprule
+ & $p$ & Hellinger & Norm. & L2 & Global \\
+\midrule
+motorbike & .104 & .632 & .589 & .513 & .523 \\
+aeroplane & .105 & .691 & .654 & .521 & .682 \\
+person    & .477 & .750 & .523 & .695 & .752 \\
+horse     & .121 & .662 & .615 & .560 & .645 \\
+car       & .238 & .734 & .651 & .676 & .745 \\
+\midrule
+mAP       & .209 & \textbf{.694} & .606 & .593 & .669 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Stage E -- normalização e informação espacial.}
+Com L2, $K(\mathbf h,\mathbf h)=\|\mathbf h\|_2^2=1$ para todas as imagens. Por
+Cauchy--Schwarz, $K(\mathbf h,\mathbf h')\le 1$, com igualdade só se
+$\mathbf h'=\mathbf h$: o kernel é o cosseno, e cada imagem é a mais semelhante
+a si própria. Isto não vale sem normalização ($\|\mathbf h\|^2$ cresce com o
+número de descritores) nem com L1 ($\sum_k h_k^2$ depende da concentração do
+histograma). Com tiles, o L2 é o melhor dos três em todos os $K$, mas o ganho é
+modesto. Sem tiles, não há diferença (Tab.~\ref{tab:part1-norm}). Retirar os
+tiles prejudica a motorbike ($-0.109$ no test), cujo layout é estável. Pelo
+contrário, ajuda ligeiramente o person e o car, que aparecem em qualquer
+posição e escala.
+
+\begin{table}[t]
+\centering
+\caption{mAP de validação por mapa ($K=512$).}
+\label{tab:part1-norm}
+\small
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+ & Nenhum & L1 & L2 & $\sqrt{\cdot}$ & $\sqrt{\cdot}$+L1 & $\sqrt{\cdot}$+L2 \\
+\midrule
+Tiles  & .607 & .570 & .628 & .680 & .597 & \textbf{.717} \\
+Global & .573 & .576 & .575 & .622 & .563 & .668 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Stage F -- Hellinger.}
+O histograma normaliza-se em L1 \emph{antes} da raiz,
+$\phi(\mathbf h)=\sqrt{\mathbf h/\|\mathbf h\|_1}$. Isto equivale a raiz seguida
+de L2, porque $\|\phi(\mathbf h)\|_2=1$, e por isso cumpre também a regra do
+L2. Normalizar em L1 depois da raiz baixa o mAP para 0.597. A raiz comprime as
+palavras frequentes (céu, asfalto) mais do que as raras, que são mais
+específicas do objeto. Na motorbike, o AP de test sobe de 0.513 para 0.632, e
+o mAP de 0.593 para 0.694.
+
+\paragraph{Stage G -- quantidade de treino.}
+Com todos os dados, o mAP de validação é 0.626 com o kernel linear e 0.716 com
+o Hellinger (Fig.~\ref{fig:part1-frac}; 5 seeds, subconjuntos estratificados).
+Com 100\,\% muda só a ordem das amostras, mas como o SVM não converge, o L2 dá
+0.626 em vez dos 0.628 da Tab.~\ref{tab:part1-norm}.
+O Hellinger com 10\,\% (0.532) iguala o linear com 50\,\%. A curva não
+satura: de 50 para 100\,\%, o mAP ainda sobe 0.07--0.09. Mas a diversidade
+deve ajudar mais do que a quantidade. Com poucos dados, o desvio entre seeds
+chega a $\pm$0.12, e o AP de treino do Hellinger fica $\ge$0.99 (média) em
+todas as frações. Motos
+fora da pista ou cavalos sem cavaleiro atacariam os erros das Stages B e D.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/part1_fractions.png}
+\caption{AP de validação vs.\ imagens de treino (média $\pm$ desvio, 5 seeds).}
+\label{fig:part1-frac}
+\end{figure*}

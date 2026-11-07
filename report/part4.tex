@@ -3,15 +3,15 @@
 
 \paragraph{Protocolo.}
 Todos os modelos estão congelados e usam o pré-processamento oficial (crop
-central de 224\,px): ResNet-18 \cite{he2016resnet} e ViT-B/32
-\cite{dosovitskiy2021vit} com pesos ImageNet do torchvision, DINOv2 ViT-S/14
-\cite{oquab2024dinov2} e CLIP ViT-B/32 \cite{radford2021clip}. Na ResNet
+central de 224\,px): ResNet-18 e ViT-B/32 com pesos ImageNet do torchvision,
+DINOv2 ViT-S/14 e CLIP ViT-B/32. Na ResNet
 usamos o \emph{global average pooling} dos três últimos stages. No DINOv2
 usamos o token CLS e, como extensão, a média dos 256 patch tokens. Os splits e
 o SVM ($C=10$) são os das partes anteriores, e as features deep são
 normalizadas em L2. Nas Stages D--E, o $C$ e os prompts são escolhidos no val
 mAP. A extração foi medida em CPU sobre as 4946 imagens, incluindo o
-carregamento do modelo, a leitura do JPEG e o pré-processamento. Nos
+carregamento do modelo, a leitura do JPEG e o pré-processamento. Como
+extraímos também a imagem espelhada, o tempo é por passagem pelo modelo. Nos
 handcrafted usamos os tempos da Parte~2, medidos em 5 imagens, por isso a
 comparação de tempos é aproximada. A inferência é o mapa de features mais o
 SVM (ou a semelhança ao texto), por imagem de test.
@@ -19,8 +19,8 @@ SVM (ou a semelhança ao texto), por imagem de test.
 \begin{table*}[h]
 \centering
 \caption{AP de test por categoria (SVM linear, $C=10$; features deep em L2).
-As linhas handcrafted são as escolhas da Parte~2. Extração e inferência em CPU,
-por imagem.}
+As linhas handcrafted são as escolhas da Parte~2. Os grupos indicam a
+supervisão de cada método. Extração e inferência em CPU, por imagem.}
 \label{tab:part4}
 \small
 \resizebox{\linewidth}{!}{%
@@ -28,17 +28,25 @@ por imagem.}
 \toprule
 Representação & mbike & aero & person & horse & car & mAP & $d$ & Extr.\ (ms) & Inf.\ ($\mu$s) \\
 \midrule
+\multicolumn{10}{l}{\emph{Só labels da tarefa}} \\
 BoVW $K{=}512$, Hellinger     & .632 & .691 & .750 & .662 & .734 & .694 &  2048 & 254 &  34 \\
 VLAD $K{=}32$                 & .707 & .726 & .768 & .735 & .793 & .746 & 10240 & 224 & 336 \\
 FV $K{=}32$                   & .783 & .759 & .811 & .758 & .807 & .784 & 20608 & 278 & 463 \\
 \midrule
+\multicolumn{10}{l}{\emph{Pré-treino supervisionado (ImageNet) + labels da tarefa}} \\
 ResNet-18 layer2              & .767 & .768 & .857 & .725 & .786 & .781 &   128 &  18 & 0.8 \\
 ResNet-18 layer3              & .894 & .881 & .963 & .876 & .902 & .903 &   256 &  18 & 1.7 \\
 ResNet-18 layer4              & .974 & .968 & .973 & .954 & .954 & .964 &   512 &  18 & 4.3 \\
-ViT-B/32 (ImageNet)           & .982 & .987 & .937 & .954 & .945 & .961 &   768 &  35 & 6.8 \\
+ViT-B/32                      & .982 & .987 & .937 & .954 & .945 & .961 &   768 &  35 & 6.8 \\
+\midrule
+\multicolumn{10}{l}{\emph{Pré-treino auto-supervisionado + labels da tarefa}} \\
 DINOv2 ViT-S/14, CLS          & .982 & 1.00 & .978 & .994 & .951 & .981 &   384 &  52 & 3.5 \\
 DINOv2 ViT-S/14, média patches & .980 & 1.00 & .988 & .985 & .967 & .984 &   384 &  52 & 3.2 \\
+\midrule
+\multicolumn{10}{l}{\emph{Pré-treino imagem--texto + labels da tarefa}} \\
 CLIP ViT-B/32 + SVM           & .994 & .998 & .991 & .992 & .979 & \textbf{.991} & 512 & 35 & 5.4 \\
+\midrule
+\multicolumn{10}{l}{\emph{Pré-treino imagem--texto, sem labels da tarefa}} \\
 CLIP zero-shot (``a photo of a \dots'') & .889 & .982 & .583 & .811 & .865 & .826 & 512 & 35 & 2.9 \\
 \bottomrule
 \end{tabular}}
@@ -137,9 +145,9 @@ com 20. Com 1 positivo, o resultado depende da imagem sorteada (motorbike
 $\pm0.36$). O flip horizontal prejudica quando o label depende da orientação
 (texto, dígitos, sinais, objetos com lado definido). Nas nossas classes
 preserva o label e não muda nada: altera o val mAP no máximo 0.005. O flip no
-teste (TTA, condição separada, medida no val com todos os positivos) também
-não ajuda: 0.9823 sem TTA, 0.9816 com a média dos scores e 0.9818 com a
-média das features. Plausivelmente porque o DINOv2 já foi
+teste (TTA, condição separada, medida no val com todos os positivos e treino
+com flip) também não ajuda: 0.9823 sem TTA, 0.9816 com a média dos scores e
+0.9818 com a média das features. Plausivelmente porque o DINOv2 já foi
 treinado com flips. As duas médias não são equivalentes em geral: para
 $s(x)=\mathbf{w}^\top\phi(x)+b$ só coincidem se $\phi$ for linear. Com L2,
 para duas features unitárias a um ângulo $\theta$, a média das features
@@ -226,8 +234,8 @@ Os mapas decompõem exatamente o score do SVM pelas posições da feature map
 o objeto. O DINOv2 faz o mesmo no person e no car, mas no aeroplane e na
 motorbike espalha-se pelo céu e pela estrada (Fig.~\ref{fig:part4examples}).
 Os falsos positivos mostram dependência de contexto, e as mesmas imagens
-enganam os dois modelos: um barco num atrelado na rua (car), um dirigível
-(aeroplane). Os mapas dizem com rigor quanto cada posição contribuiu
+enganam os dois modelos: um barco num atrelado na rua (car), a vela de um
+veleiro (aeroplane). Os mapas dizem com rigor quanto cada posição contribuiu
 \emph{para esta decisão} e revelam uso de contexto. Não mostram que a
 evidência está no pixel realçado, porque cada posição do layer4 vê quase a
 imagem toda e a self-attention mistura os patches. Também não provam

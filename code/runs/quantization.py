@@ -20,7 +20,7 @@ For FV the GMM means play the role of the words (hard, Euclidean assignment).
 
 Results: <out>/quantization.csv and <out>/quantization.png.
 
-Usage (from the directory containing README.md):
+Usage:
     python -m runs.quantization
     python -m runs.quantization --images 200 --encoders bovw_K256_C0 bovw_K1024_C0
 """
