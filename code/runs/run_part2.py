@@ -12,7 +12,9 @@ together with feature dimension, storage, extraction and SVM times.
 
 Results are written to <out>/part2_grid.csv and <out>/part2_encodings.csv.
 Test precision-recall curves of the selected settings (retrieval = test images
-ranked by SVM score, as in Part 1 Stage C) go to <out>/part2_pr_curves.png.
+ranked by SVM score, as in Part 1 Stage C) go to <out>/part2_pr_curves.png, and
+their operating points (precision at 30/60/90 % recall, recall at precision 1)
+to <out>/part2_pr_points.csv.
 
 Usage:
     python -m runs.run_part2
@@ -167,13 +169,35 @@ def selectSettings(grid):
     return {enc: (spatial, fmap) for enc, spatial, fmap in mean_val.groupby(level="encoding", sort=False).idxmax()}
 
 
+PR_RECALLS = [0.3, 0.6, 0.9]
+
+
+def prPoints(y, scores, precision, recall):
+    """Operating points of one test PR curve, as quoted in the report.
+
+    recall_at_p1   recall reached before the first negative of the ranking
+                   (precision is exactly 1 up to there)
+    p@r<r>         precision at the first point of the curve with recall >= r
+                   (not interpolated)
+    """
+    ranked = (y[np.argsort(-scores, kind="stable")] > 0)
+    first_negative = np.argmin(ranked) if not ranked.all() else len(ranked)
+    row = {"ap": average_precision_score(y, scores), "recall_at_p1": first_negative / ranked.sum()}
+    for r in PR_RECALLS:
+        reached = recall >= r
+        row[f"p@r{r:g}"] = precision[reached][np.argmin(recall[reached])]
+    return row
+
+
 def plotPRCurves(grid, encodings, categories, C, path):
     """Test precision-recall curves of the val-selected setting of each encoding, one panel per category.
 
     The SVMs are retrained with the grid's settings (deterministic, seed 42), so the
-    APs in the legend equal ap_test in part2_grid.csv.
+    APs in the legend equal ap_test in part2_grid.csv. Returns the operating
+    points of every curve (prPoints), one row per encoding and category.
     """
     settings = selectSettings(grid)
+    points = []
     fig, axes = plt.subplots(1, len(categories), figsize=(3.2 * len(categories), 3.4), sharey=True,
                              squeeze=False)
     for ax, category in zip(axes[0], categories):
@@ -186,6 +210,7 @@ def plotPRCurves(grid, encodings, categories, C, path):
             x, y, _ = data["test"]
             scores = transform(x) @ W + b
             precision, recall, _ = precision_recall_curve(y, scores)
+            points.append({"encoding": encoding, "category": category, **prPoints(y, scores, precision, recall)})
             ax.plot(recall, precision, label=f"{NAMES[enc_type]} K={K}: "
                                              f"{average_precision_score(y, scores):.3f}")
         ax.axhline(np.mean(y > 0), color="grey", ls=":", lw=1, label="random")
@@ -198,6 +223,7 @@ def plotPRCurves(grid, encodings, categories, C, path):
     axes[0][0].set_ylabel("Precision")
     fig.tight_layout()
     fig.savefig(path, dpi=150)
+    return pd.DataFrame(points)
     plt.close(fig)
 
 
@@ -266,5 +292,8 @@ if __name__ == "__main__":
         summarize(grid, encodings_info)
 
     pr_encodings = [e for e in args.pr_encodings if e in set(grid["encoding"])]
-    plotPRCurves(grid, pr_encodings, args.categories, args.C, out_dir / "part2_pr_curves.png")
+    points = plotPRCurves(grid, pr_encodings, args.categories, args.C, out_dir / "part2_pr_curves.png")
+    points.to_csv(out_dir / "part2_pr_points.csv", index=False)
+    print("\n=== Test PR operating points (selected settings) ===")
+    print(points.round(3).to_string(index=False))
     print(f"\nResults written to {out_dir.resolve()}")
