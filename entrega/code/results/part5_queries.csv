@@ -1,0 +1,13 @@
+category,name,labels,group,max_sim_corpus,nearest_corpus
+horse,002405,horse+person,with person,0.6388544875372943,003948
+horse,005636,horse+person,with person,0.6288273765026988,006611
+horse,002713,horse+person,with person,0.7474959226456612,004872
+horse,006836,horse+person,with person,0.8797522767431734,009202
+horse,000372,horse+person,with person,0.6156476622527297,003121
+horse,004339,horse+person,with person,0.7806016909175283,003948
+horse,006134,horse,without person,0.5567603304440871,006933
+horse,002042,horse,without person,0.46888738568679755,009719
+horse,009255,horse,without person,0.698655646776618,006249
+horse,002774,horse,without person,0.6990698996530399,007109
+horse,007185,horse,without person,0.7184241023186269,008653
+horse,002471,horse,without person,0.6513691044771355,006797

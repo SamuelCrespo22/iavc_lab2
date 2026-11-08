@@ -10,7 +10,7 @@
   C, D     precision-recall curves on train and test, every category
            (part1_pr_curves.png)
 
-Setting: the supplied vocabulary (bovw_K512_C0), 2x2 tiles and the Hellinger
+Setting: the K = 512 vocabulary trained on our protocol (bovw_K512_C0), 2x2 tiles and the Hellinger
 map, the setting with the best mean validation AP in run_part1. Linear SVM,
 C = 10, positives vs. background, protocol splits.
 

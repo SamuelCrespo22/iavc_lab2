@@ -1,0 +1,299 @@
+"""Part 2 experiments: VLAD and Fisher Vectors vs. BoVW with a linear SVM.
+
+For each encoding in data/encodings and each category, trains the same linear SVM as Part 1 on the
+same protocol splits, over:
+
+  spatial      2x2 tiles vs. a single global vector (tiles summed)
+  feature map  normalizations that suit the encoding type (see FEATURE_MAPS)
+
+Per encoding, one setting (spatial + feature map) is selected on mean
+validation AP over the categories; its per-class test AP and mAP are reported
+together with feature dimension, storage, extraction and SVM times.
+
+Results are written to <out>/part2_grid.csv and <out>/part2_encodings.csv.
+Test precision-recall curves of the selected settings (retrieval = test images
+ranked by SVM score, as in Part 1 Stage C) go to <out>/part2_pr_curves.png, and
+their operating points (precision at 30/60/90 % recall, recall at precision 1)
+to <out>/part2_pr_points.csv.
+
+Usage:
+    python -m runs.run_part2
+"""
+
+import argparse
+import re
+import time
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.metrics import average_precision_score, precision_recall_curve
+
+from src.encoders import ImageEncoder
+from src.splits import loadProtocolSubset
+from runs.run_part1 import CATEGORIES, l2, loadData, removeSpatialInformation, trainAndEvaluate
+
+ENCODINGS_DIR = Path("data/encodings")
+ENCODERS_DIR = Path("data/encoders")
+NAMES = {"bovw": "BoVW", "vlad": "VLAD", "fv": "FV"}
+
+
+def signedSqrt(x):
+    """Power normalization with alpha = 0.5: sign(x) * sqrt(|x|)."""
+    return np.sign(x) * np.sqrt(np.abs(x))
+
+
+def intraNorm(x, D):
+    """L2-normalize each D-dimensional block (one VLAD residual per visual word).
+
+    cyvlfeat stores VLAD as [v_1 | v_2 | ... | v_K] per tile, so the blocks are
+    contiguous both with and without tiling.
+    """
+    N = x.shape[0]
+    return l2(x.reshape(-1, D)).reshape(N, -1)
+
+
+# Feature maps per encoding type, applied after the optional tile merging.
+# VLAD tiles are stored L2-normalized; FV tiles are stored raw (no improved FV).
+FEATURE_MAPS = {
+    "bovw": {
+        "l2": lambda x, D: l2(x),
+        "sqrt_l2": lambda x, D: l2(np.sqrt(x)),
+    },
+    "vlad": {
+        "none": lambda x, D: x,
+        "l2": lambda x, D: l2(x),
+        "ssr_l2": lambda x, D: l2(signedSqrt(x)),
+        "intra_l2": lambda x, D: l2(intraNorm(x, D)),
+        "ssr_intra_l2": lambda x, D: l2(intraNorm(signedSqrt(x), D)),
+    },
+    "fv": {
+        "none": lambda x, D: x,
+        "l2": lambda x, D: l2(x),
+        "ssr_l2": lambda x, D: l2(signedSqrt(x)),
+    },
+}
+
+
+def parseEncoding(name):
+    """'vlad_K32_C80' -> ('vlad', 32, 80). C=0 means no PCA (D = 128)."""
+    enc_type, K, C = re.fullmatch(r"(bovw|vlad|fv)_K(\d+)_C(\d+)", name).groups()
+    return enc_type, int(K), int(C)
+
+
+def defaultEncodings():
+    found = sorted(p.name for p in ENCODINGS_DIR.iterdir()
+                   if p.is_dir() and p.name.startswith(("vlad_", "fv_")))
+    return ["bovw_K512_C0"] + found
+
+
+def prepare(x, spatial, enc_type, feature_map, D):
+    x = x.astype(np.float64)
+    if not spatial:
+        x = removeSpatialInformation(x)
+    return FEATURE_MAPS[enc_type][feature_map](x, D)
+
+
+def runGrid(encodings, categories, spatials, C):
+    rows = []
+    for encoding in encodings:
+        enc_type, K, pca_dim = parseEncoding(encoding)
+        D = pca_dim or 128
+        for category in categories:
+            data = loadData(category, encoding)
+            for spatial in spatials:
+                for feature_map in FEATURE_MAPS[enc_type]:
+                    transform = lambda x: prepare(x, spatial, enc_type, feature_map, D)
+                    res = trainAndEvaluate(data, transform, C)
+                    rows.append({"encoding": encoding, "type": enc_type, "K": K,
+                                 "category": category, "spatial": spatial,
+                                 "feature_map": feature_map, **res})
+                    print(f"{encoding:14s} {category:10s} spatial={spatial!s:5s} {feature_map:13s} "
+                          f"dim={res['dim']:6d} AP train={res['ap_train']:.3f} "
+                          f"val={res['ap_val']:.3f} test={res['ap_test']:.3f}")
+    return pd.DataFrame(rows)
+
+
+def measureEncodings(encodings, num_images):
+    """Storage per encoding and, on ``num_images`` test images, extraction times.
+
+    Dense SIFT is computed once per image (shared by all encoders); the
+    encoding time covers PCA projection + encoding of the 4 tiles.
+    """
+    rows = {}
+    for encoding in encodings:
+        files = list((ENCODINGS_DIR / encoding).glob("*.npz"))
+        sample = np.load(files[0])["histograms"]
+        with np.load(ENCODERS_DIR / f"{encoding}.npz") as cfg:
+            # Saved by src.train since fit times are recorded; NaN for older encoders.
+            fit_time = float(cfg["fit_time_s"]) if "fit_time_s" in cfg.files else np.nan
+        rows[encoding] = {
+            "encoding": encoding,
+            "dim": sample.shape[1],
+            "dtype": str(sample.dtype),
+            "kb_per_image": sample.shape[1] * sample.dtype.itemsize / 1024,
+            "disk_mb": sum(f.stat().st_size for f in files) / 2**20,
+            "codebook_fit_s": fit_time,
+        }
+
+    if num_images > 0:
+        _, _, names = loadProtocolSubset(CATEGORIES[0], encodings[0], subset="test")
+        images = [f"data/images/{name}.jpg" for name in names[:num_images]]
+        encoders = {e: ImageEncoder(ENCODERS_DIR / f"{e}.npz") for e in encodings}
+        sift_times, enc_times = [], {e: [] for e in encodings}
+        # Untimed warm-up: the first call pays one-off setup, which would land on encodings[0].
+        warm = encoders[encodings[0]].computeFeatures(images[0])
+        for encoder in encoders.values():
+            encoder.encode_tiling(*warm)
+        for image in images:
+            start = time.perf_counter()
+            kpts, desc, isize = encoders[encodings[0]].computeFeatures(image)
+            sift_times.append(time.perf_counter() - start)
+            for encoding, encoder in encoders.items():
+                start = time.perf_counter()
+                encoder.encode_tiling(kpts, desc, isize)
+                enc_times[encoding].append(time.perf_counter() - start)
+        for encoding in encodings:
+            rows[encoding]["sift_ms_per_image"] = 1000 * np.mean(sift_times)
+            rows[encoding]["encode_ms_per_image"] = 1000 * np.mean(enc_times[encoding])
+
+    return pd.DataFrame(rows.values())
+
+
+def selectSettings(grid):
+    """{encoding: (spatial, feature_map)} with the best mean val AP over the categories."""
+    mean_val = grid.groupby(["encoding", "spatial", "feature_map"], sort=False)["ap_val"].mean()
+    return {enc: (spatial, fmap) for enc, spatial, fmap in mean_val.groupby(level="encoding", sort=False).idxmax()}
+
+
+PR_RECALLS = [0.3, 0.6, 0.9]
+
+
+def prPoints(y, scores, precision, recall):
+    """Operating points of one test PR curve, as quoted in the report.
+
+    recall_at_p1   recall reached before the first negative of the ranking
+                   (precision is exactly 1 up to there)
+    p@r<r>         precision at the first point of the curve with recall >= r
+                   (not interpolated)
+    """
+    ranked = (y[np.argsort(-scores, kind="stable")] > 0)
+    first_negative = np.argmin(ranked) if not ranked.all() else len(ranked)
+    row = {"ap": average_precision_score(y, scores), "recall_at_p1": first_negative / ranked.sum()}
+    for r in PR_RECALLS:
+        reached = recall >= r
+        row[f"p@r{r:g}"] = precision[reached][np.argmin(recall[reached])]
+    return row
+
+
+def plotPRCurves(grid, encodings, categories, C, path):
+    """Test precision-recall curves of the val-selected setting of each encoding, one panel per category.
+
+    The SVMs are retrained with the grid's settings (deterministic, seed 42), so the
+    APs in the legend equal ap_test in part2_grid.csv. Returns the operating
+    points of every curve (prPoints), one row per encoding and category.
+    """
+    settings = selectSettings(grid)
+    points = []
+    fig, axes = plt.subplots(1, len(categories), figsize=(3.2 * len(categories), 3.4), sharey=True,
+                             squeeze=False)
+    for ax, category in zip(axes[0], categories):
+        for encoding in encodings:
+            enc_type, K, pca_dim = parseEncoding(encoding)
+            spatial, feature_map = settings[encoding]
+            data = loadData(category, encoding)
+            transform = lambda x: prepare(x, spatial, enc_type, feature_map, pca_dim or 128)
+            _, (W, b) = trainAndEvaluate(data, transform, C, return_model=True)
+            x, y, _ = data["test"]
+            scores = transform(x) @ W + b
+            precision, recall, _ = precision_recall_curve(y, scores)
+            points.append({"encoding": encoding, "category": category, **prPoints(y, scores, precision, recall)})
+            ax.plot(recall, precision, label=f"{NAMES[enc_type]} K={K}: "
+                                             f"{average_precision_score(y, scores):.3f}")
+        ax.axhline(np.mean(y > 0), color="grey", ls=":", lw=1, label="random")
+        ax.set_title(category)
+        ax.set_xlabel("Recall")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1.02)
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=7, loc="lower left", title="test AP", title_fontsize=7)
+    axes[0][0].set_ylabel("Precision")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    return pd.DataFrame(points)
+    plt.close(fig)
+
+
+def summarize(grid, encodings_info):
+    pd.set_option("display.width", 200)
+    pd.set_option("display.max_columns", 30)
+
+    print("\n=== Test AP per setting (rows) / category (cols) ===")
+    for encoding, enc_df in grid.groupby("encoding", sort=False):
+        print(f"\n{encoding}")
+        print(enc_df.pivot_table(index=["spatial", "feature_map"], columns="category",
+                                 values="ap_test").round(3))
+
+    # One setting per encoding, chosen on mean val AP over the categories.
+    best = [(enc, *setting) for enc, setting in selectSettings(grid).items()]
+    selected = pd.concat([grid.set_index(["encoding", "spatial", "feature_map"]).loc[[key]]
+                          for key in best]).reset_index()
+
+    print("\n=== Selected setting per encoding (on mean val AP): test AP ===")
+    table = selected.pivot_table(index=["encoding", "spatial", "feature_map"],
+                                 columns="category", values="ap_test", sort=False)
+    table["mAP"] = table.mean(axis=1)
+    print(table.round(3))
+
+    costs = selected.groupby("encoding", sort=False)[["train_time_s", "infer_ms_per_image"]].mean()
+    print("\n=== Cost per encoding (selected setting) ===")
+    print(encodings_info.set_index("encoding").join(costs).join(
+        table["mAP"].droplevel(["spatial", "feature_map"])).round(3))
+
+
+def parseArgs():
+    parser = argparse.ArgumentParser(description="Run all Part 2 (VLAD / FV vs. BoVW) experiments.")
+    parser.add_argument("--encodings", nargs="+", default=None,
+                        help="Encoding names in data/encodings (default: bovw_K512_C0 + all vlad_*/fv_*)")
+    parser.add_argument("--categories", nargs="+", default=CATEGORIES)
+    parser.add_argument("--C", type=float, default=10.0, help="SVM C (fixed, as in Part 1)")
+    parser.add_argument("--tiled-only", action="store_true", help="Skip the global (no tiles) variant")
+    parser.add_argument("--timing-images", type=int, default=5,
+                        help="Images used to time SIFT + encoding; 0 disables")
+    parser.add_argument("--pr-encodings", nargs="+", default=["bovw_K512_C0", "vlad_K32_C80", "fv_K32_C80"],
+                        help="Encodings drawn in part2_pr_curves.png")
+    parser.add_argument("--plot-only", action="store_true",
+                        help="Only draw the PR curves, from an existing <out>/part2_grid.csv")
+    parser.add_argument("--out", default="results")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parseArgs()
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.plot_only:
+        grid = pd.read_csv(out_dir / "part2_grid.csv")
+    else:
+        encodings = args.encodings or defaultEncodings()
+        print("Encodings:", ", ".join(encodings))
+
+        encodings_info = measureEncodings(encodings, args.timing_images)
+        encodings_info.to_csv(out_dir / "part2_encodings.csv", index=False)
+
+        spatials = [True] if args.tiled_only else [True, False]
+        grid = runGrid(encodings, args.categories, spatials, args.C)
+        grid.to_csv(out_dir / "part2_grid.csv", index=False)
+
+        summarize(grid, encodings_info)
+
+    pr_encodings = [e for e in args.pr_encodings if e in set(grid["encoding"])]
+    points = plotPRCurves(grid, pr_encodings, args.categories, args.C, out_dir / "part2_pr_curves.png")
+    points.to_csv(out_dir / "part2_pr_points.csv", index=False)
+    print("\n=== Test PR operating points (selected settings) ===")
+    print(points.round(3).to_string(index=False))
+    print(f"\nResults written to {out_dir.resolve()}")

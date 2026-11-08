@@ -1,24 +1,27 @@
-# CUDA 12.6 (default):
+# CUDA 12.6 (optional: uncomment these lines and comment out the CPU ones):
 # --extra-index-url https://download.pytorch.org/whl/cu126
 # torch==2.14.0+cu126
 # torchvision==0.29.0+cu126
 # xformers
 
-# CPU-only fallback:
+# CPU-only (active):
  torch==2.14.0
  torchvision==0.29.0
 
-torchinfo
+numpy==2.4.6
+scipy==1.17.1
+pillow==13.0.0
+tqdm==4.70.1
+torchinfo==1.8.0
 ipykernel
 ipywidgets
 kornia==0.8.3
 matplotlib==3.11.1
 opencv-contrib-python==4.13.0.92
 pandas==3.0.5
-tabulate
+tabulate==0.10.0
 scikit-image==0.26.0
 scikit-learn==1.9.1
 transformers==5.17.0
 accelerate==1.15.0
-torchinfo
-git+https://github.com/openai/CLIP.git
+git+https://github.com/openai/CLIP.git@d05afc436d78f1c48dc0dbf8e5980a9d471f35f6

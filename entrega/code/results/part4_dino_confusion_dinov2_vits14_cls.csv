@@ -1,0 +1,7 @@
+true,motorbike,aeroplane,person,horse,car,background
+motorbike,8,0,8,0,18,3
+aeroplane,0,81,24,0,7,0
+person,0,1,625,0,10,48
+horse,0,0,5,23,0,3
+car,1,0,37,0,171,19
+background,0,2,67,0,25,983

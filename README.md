@@ -16,16 +16,12 @@ scripts de `code/runs/`.
 
 ```text
 .
-├── assignment_2.pdf          # Enunciado.
 ├── README.md                 # Este ficheiro.
-├── report/                   # Secções LaTeX do relatório (intro, method, part1–5, discussion, ...).
-├── answers/                  # Respostas às perguntas do enunciado, por parte (rascunhos do relatório).
-├── wheel/                    # Wheel do cyvlfeat para Windows (fornecido, não versionado).
 └── code/
     ├── README.md             # README original fornecido (inalterado).
     ├── env.yml, env-win.yml  # Ambiente conda (Python 3.11 + cyvlfeat 0.7.1).
     ├── requirements.txt      # Pacotes pip.
-    ├── data/                 # Imagens, splits, encoders e encodings (não versionado, ver "Dados").
+    ├── data/                 # Splits e encoders incluídos; imagens e encodings não (ver "Dados").
     ├── src/                  # Biblioteca: SIFT, encoders, extração, splits, SVM.
     ├── runs/                 # Um script por parte/stage; escrevem CSVs e figuras em results/.
     └── results/              # CSVs e figuras usados no relatório.
@@ -85,7 +81,13 @@ code/data/images/   # *.jpg
 code/data/splits/   # <categoria>_{train,val}.txt fornecidos
 ```
 
-`code/data/` não está no git (é grande e é regenerado pelos passos abaixo).
+As imagens não vêm nesta entrega, porque são dados de terceiros e não devem ser
+redistribuídas. Obtêm-se na ligação "Access the code and data repository" do
+enunciado, ou no [site do PASCAL VOC 2007](http://host.robots.ox.ac.uk/pascal/VOC/voc2007/)
+(trainval). Os encodings (cerca de 4 GB) também não vêm e regeneram-se no passo
+3 abaixo. A entrega inclui `code/data/splits/`, `code/data/splits_protocol/` e
+`code/data/encoders/` (cerca de 3 MB), por isso os passos 1 e 2 são opcionais.
+Os pesos pré-treinados não estão incluídos.
 
 ## Protocolo
 
@@ -114,6 +116,50 @@ code/data/splits/   # <categoria>_{train,val}.txt fornecidos
   | Parte 5 (queries e PCA: 0; subconjuntos do corpus: 0–2) | 0, 0–2 |
   | Erro de quantização (`runs.quantization`) | 0 |
 
+## Experiências concluídas
+
+Foram feitas todas as Stages das Partes 1 a 5:
+
+- **Parte 1 (A–G):** BoVW com K = 256/512/1024, tiles, normalizações, Hellinger e frações de treino.
+- **Parte 2:** VLAD e FV com K = 16/32/64, classificação e retrieval.
+- **Parte 3:** condições A–D no BoVW e o equivalente em VLAD/FV, com 3 seeds.
+- **Parte 4 (A–F):** ResNet-18, DINOv2 (com a extensão opcional da média dos patches), few-shot e flip, escolha de C, CLIP zero-shot, e análise visual.
+- **Parte 5 (A–C):** categoria *horse*, 12 queries, com BoVW, VLAD, ResNet-18, DINOv2 e CLIP texto-imagem.
+
+Não feito (opcional no enunciado): retrieval com features ao nível dos patches
+na Parte 5.
+
+## Desvios e limitações do protocolo
+
+- **SIFT e codebooks recalculados:** não usámos os descritores nem os encoders
+  fornecidos. Recalculámos o dense SIFT e treinámos os codebooks só com o treino
+  do protocolo, para não usar as imagens de validação.
+- **One-vs-background:** nas Partes 1–4, cada SVM usa os positivos da categoria
+  contra o background, como na Stage B. As outras categorias ficam fora do treino
+  e do ranking; não é one-vs-rest.
+- **Matrizes de confusão:** excluem as imagens com várias categorias (restam
+  2169 de test), e o argmax compara SVMs não calibrados entre si.
+- **CLIP a 6 vias:** a classificação zero-shot usa os 5 prompts das categorias
+  e mais um de background, porque o test contém background. O enunciado fala só
+  nas cinco categorias.
+- **DINOv2:** o resize para 256 é bilinear (código fornecido), e o oficial é
+  bicúbico.
+- **SVM sem convergência:** mantivemos `max_iter=100` do código fornecido, e
+  vários SVMs não convergem. Os testes de convergência citados no relatório (até
+  20 000 iterações, e 5000 na VLAD K=64) foram feitos à parte e **não** fazem
+  parte dos scripts de `runs/`.
+- **K das linhas handcrafted na Parte 4 e na Parte 5:** VLAD e FV usam o K = 32
+  sugerido no enunciado. Só os tiles e a normalização foram escolhidos na
+  validação, e o K não foi.
+- **Parte 3:** normalização fixa por encoding, diferente da escolhida na Parte 2
+  para a VLAD, para que só K e d variem. O BoVW é global. Todas as condições são
+  reportadas no test, como o enunciado pede.
+- **Tempos:** só CPU. A extração handcrafted foi medida em 5 imagens e em duas
+  corridas (Partes 2 e 3), e a inferência dos handcrafted da Tab. 7 foi medida
+  de novo no `run_part4_resnet`, por isso os valores diferem entre tabelas.
+- **Parte 5:** uma só categoria e 12 queries. O limiar de quase-duplicados
+  (cosseno DINOv2 > 0.9) é arbitrário e usa um dos métodos avaliados.
+
 ## Reproduzir os resultados
 
 Todos os comandos correm a partir de `code/`. Os scripts de `runs/` escrevem em
@@ -126,7 +172,7 @@ existe (`-f` força).
 python -m src.splits            # data/splits -> data/splits_protocol
 ```
 
-### 2. Encoders handcrafted
+### 2. Encoders handcrafted (já incluídos em `data/encoders/`)
 
 O dense SIFT é recalculado com `vl_phow` (passo 4 px, bins 4/6/8/10 px,
 imagem em cinzento com altura máxima 480 px), em vez de usar os descritores
